@@ -187,7 +187,7 @@ class ProcessTests(unittest.IsolatedAsyncioTestCase):
     async def test_large_output_and_timeout_are_bounded(self):
         with self.assertRaises(SSHError):
             await run_json([sys.executable, '-c', 'import sys; sys.stdin.readline(); print("x"*300000)'], {})
-        with self.assertRaises(TimeoutError):
+        with self.assertRaisesRegex(SSHError, 'timed out after 0.1 seconds'):
             await run_json([sys.executable, '-c', 'import time; time.sleep(60)'], {}, timeout=.1)
 
     async def test_stderr_secrets_are_not_exposed(self):

@@ -18,6 +18,8 @@ def configure(subparsers):
     commands = parser.add_subparsers(dest='security_command', required=True)
     commands.add_parser('init').add_argument('--name', required=True)
     commands.add_parser('pair-code')
+    info = commands.add_parser('connection-info', help='List LAN and public address candidates; queries api.ipify.org over HTTPS')
+    info.add_argument('--public-host', help='Approved public inbound SSH hostname/IP, if known')
     connect = commands.add_parser('connect')
     connect.add_argument('alias')
     connect.add_argument('--ssh-host', required=True, help='An already verified OpenSSH config alias')
@@ -57,6 +59,9 @@ def run(args):
         return 0
     if command == 'init':
         result = store.initialize(args.name)
+    elif command == 'connection-info':
+        from .connection_info import connection_info
+        result = connection_info(args.public_host)
     elif command == 'pair-code':
         print('One-use pairing code (expires in 5 minutes): ' + store.pair_code(), flush=True)
         return 0

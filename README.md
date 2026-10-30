@@ -42,7 +42,7 @@ A의 Codex에서:
 
 > `$agent-link` 이 PC를 A로 설정하고 pairing code를 발행해줘.
 
-스킬은 A의 identity를 준비하고 5분 유효·1회용 코드를 발행합니다. 함께 전달할 내부 hostname 후보와
+스킬은 A의 identity를 준비하고 5분 유효·1회용 코드를 발행합니다. 함께 전달할 사내 IP와 공인 주소 후보를 모두 포함한 접속 카드, SSH 계정·포트와
 A에 설치된 agent-link Python 경로를 안내합니다. 해당 정보를 B의 Codex 세션에 안전하게 전달합니다.
 
 ### PC B: 코드 입력 및 연결
@@ -51,7 +51,7 @@ B의 Codex에서:
 
 > `$agent-link` A가 발행한 pairing code와 hostname을 입력할게. 연결해줘.
 
-스킬은 코드를 안전 입력 프롬프트로 받고 B에서 A로 SSH 연결을 등록합니다. 코드 값을 shell 명령,
+스킬은 코드를 안전 입력 프롬프트로 받고 B에서 A로 SSH 연결을 등록합니다. B는 사내·공인 경로를 각각 점검하고 A의 host key와 인증을 검증한 경로를 선택합니다. 코드 값을 shell 명령,
 argv, 환경 변수, 파일에 넣지 않습니다. 연결 뒤 peer와 MCP 설정을 확인합니다.
 
 ### 필요한 네트워크 조건
@@ -131,3 +131,10 @@ Apache-2.0.
 `codex_bridge` Python 모듈은 유지합니다. 기존 `codex-bridge` 상태 디렉터리가 있으면 그 데이터를 계속
 사용하며, 새 설치는 `agent-link` 상태 디렉터리를 사용합니다. 기존 `codex_bridge_security` MCP 등록도
 계속 사용할 수 있고 새 등록의 기본 이름은 `agent_link_security`입니다.
+
+`agent-link security connection-info`는 사내 IP와 공인 주소 후보를 함께 출력합니다. 공인 IP 자동 조회에는
+`https://api.ipify.org`를 사용하며 이 서비스는 통신 중계 서버가 아닙니다. 조회 결과는 NAT/HTTPS proxy의
+출구 주소일 수 있어 A로의 입장 경로를 보장하지 않습니다. 승인된 공인 접속 주소가 있다면
+`connection-info --public-host <hostname-or-ip>`로 함께 전달하세요. 조회에 실패하면 누락 상태를 명시하고
+승인된 공인 주소를 받아야 합니다. B에서 두 경로의 DNS·TCP·SSH를 각각 확인하며, 둘 다 실패하면
+코드 재발급 대신 네트워크 경로를 먼저 해결합니다.

@@ -82,6 +82,8 @@ async def run_json(argv, payload, timeout=30):
         if not isinstance(result, dict) or result.get('ok') is not True:
             raise SSHError('Remote bridge rejected the request')
         return result['result']
+    except TimeoutError:
+        raise SSHError(f'SSH exchange timed out after {timeout:g} seconds. Check DNS, TCP reachability and the remote endpoint before retrying pairing.') from None
     except (BrokenPipeError, ConnectionResetError):
         raise SSHError('SSH process disconnected before the exchange completed') from None
     except (json.JSONDecodeError, KeyError):
