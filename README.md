@@ -1,4 +1,4 @@
-# Agent Bridge
+# Codex Bridge
 
 독립적인 Codex 대화 세션 사이의 작업 요청·응답을 위한 오픈소스 프로젝트입니다.
 현재 범위는 **Phase 1 기술 조사와 로컬 대화 유지 PoC**입니다. 인터넷 A2A 프레임워크 완성본은 아닙니다.
@@ -10,11 +10,11 @@ Python 3.11+와 로그인된 Codex CLI가 필요합니다. 검증 기준 버전�
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
-.venv/bin/agent-bridge probe
-.venv/bin/agent-bridge demo
+.venv/bin/codex-bridge probe
+.venv/bin/codex-bridge demo
 ```
 
-설치 없이 저장소 루트에서 `python3 -m agent_bridge probe` 또는 `demo`도 가능합니다.
+설치 없이 저장소 루트에서 `python3 -m codex_bridge probe` 또는 `demo`도 가능합니다.
 `probe`는 별도 stdio App Server에서 thread를 생성·조회하며 모델을 호출하지 않습니다.
 `demo`는 실제 모델을 호출하므로 계정 사용량이 발생합니다. 두 App Server와 별도 임시 작업 디렉터리에서 A/B thread를 만들고, 각자의 무작위 기억 표식을 저장합니다. B→A hello/응답을 B에 반영한 뒤 각 thread의 기억을 확인하고, A→B 역방향 왕복도 수행합니다. 임시 작업 디렉터리는 삭제되지만 Codex에 저장된 테스트 대화 기록은 남을 수 있습니다.
 

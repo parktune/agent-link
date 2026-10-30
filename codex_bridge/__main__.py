@@ -11,7 +11,7 @@ from .rpc import AppServer
 async def probe():
     """No model turn and no changes to existing conversations."""
     async with AppServer() as server:
-        with tempfile.TemporaryDirectory(prefix="agent-bridge-probe-") as cwd:
+        with tempfile.TemporaryDirectory(prefix="codex-bridge-probe-") as cwd:
             thread = await server.start_thread(cwd)
             result = await server.call("thread/read", {"threadId": thread, "includeTurns": False})
             assert result["thread"]["id"] == thread
@@ -28,7 +28,7 @@ async def demo():
                  "receiver": receiver, **data}
         print(json.dumps(value, ensure_ascii=False), flush=True)
 
-    with tempfile.TemporaryDirectory(prefix="agent-bridge-demo-") as root:
+    with tempfile.TemporaryDirectory(prefix="codex-bridge-demo-") as root:
         for name in ("A", "B"):
             Path(root, name).mkdir()
         async with AppServer() as a, AppServer() as b:
@@ -66,13 +66,13 @@ async def demo():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Codex Agent Bridge feasibility PoC")
+    parser = argparse.ArgumentParser(description="Codex Bridge feasibility PoC")
     parser.add_argument("command", choices=["probe", "demo"])
     args = parser.parse_args()
     try:
         asyncio.run(probe() if args.command == "probe" else demo())
     except (RuntimeError, TimeoutError, OSError) as exc:
-        parser.exit(1, f"agent-bridge: {exc}\n")
+        parser.exit(1, f"codex-bridge: {exc}\n")
 
 
 if __name__ == "__main__":

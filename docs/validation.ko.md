@@ -40,8 +40,8 @@ PoC의 메시지 왕복을 프로그램이 중계하므로 완성된 A2A MVP로 
 
 ```bash
 python3 -m unittest discover -s tests -v
-python3 -m agent_bridge probe
-python3 -m agent_bridge demo
+python3 -m codex_bridge probe
+python3 -m codex_bridge demo
 ```
 
 GitHub CI는 모델을 호출하지 않는 프로토콜 테스트만 실행한다.

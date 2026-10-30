@@ -2,7 +2,7 @@ import sys
 import unittest
 from pathlib import Path
 
-from agent_bridge.rpc import AppServer, RpcError
+from codex_bridge.rpc import AppServer, RpcError
 
 
 class RpcTests(unittest.IsolatedAsyncioTestCase):

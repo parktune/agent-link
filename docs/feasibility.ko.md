@@ -61,7 +61,7 @@ codex remote-control --help
 codex remote-control pair --help
 codex app-server --help
 codex app-server proxy --help
-codex app-server generate-json-schema --out /tmp/agent-bridge-schema
+codex app-server generate-json-schema --out /tmp/codex-bridge-schema
 ```
 
 CLI 업데이트 시 위 명령과 schema를 다시 확인한다. 이 프로젝트는 Codex를 자동 업데이트하지 않는다.

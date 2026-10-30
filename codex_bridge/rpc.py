@@ -36,7 +36,7 @@ class AppServer:
         self.err_reader = asyncio.create_task(self._stderr())
         try:
             await self.call("initialize", {
-                "clientInfo": {"name": "agent_bridge", "version": "0.1.0"},
+                "clientInfo": {"name": "codex_bridge", "version": "0.1.0"},
                 "capabilities": {"experimentalApi": False},
             })
             await self._send({"method": "initialized"})

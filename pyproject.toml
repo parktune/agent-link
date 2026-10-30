@@ -3,14 +3,14 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codex-agent-bridge"
+name = "codex-bridge"
 version = "0.1.0"
 description = "Feasibility-first bridge for independent Codex conversations"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 
 [project.scripts]
-agent-bridge = "agent_bridge.__main__:main"
+codex-bridge = "codex_bridge.__main__:main"
 
 [tool.setuptools.packages.find]
-include = ["agent_bridge*"]
+include = ["codex_bridge*"]

@@ -232,11 +232,11 @@ MVP에서는 실제로 독립적인 두 Codex 세션이 요청을 수신하고 �
 
 ```bash
 # 서버 A
-agent-bridge start
-agent-bridge pair
+codex-bridge start
+codex-bridge pair
 
 # 서버 B
-agent-bridge connect
+codex-bridge connect
 ```
 
 명령어는 개념적인 목표 인터페이스이며, 실제 구현 과정에서 변경해도 된다.
