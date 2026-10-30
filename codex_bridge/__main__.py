@@ -68,14 +68,27 @@ async def demo():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Codex Bridge feasibility PoC")
-    parser.add_argument("command", choices=["probe", "demo", "cloud-inspect", "cloud-probe", "cloud-status"])
-    parser.add_argument("--timeout", type=float, default=30, help="Cloud relay connection deadline in seconds")
+    parser = argparse.ArgumentParser(description="Codex Bridge: security (SSH) and comfort (reserved Tailscale) modes")
+    commands = parser.add_subparsers(dest="command", required=True)
+    for command in ("probe", "demo", "cloud-inspect", "cloud-probe", "cloud-status"):
+        child = commands.add_parser(command)
+        child.add_argument("--timeout", type=float, default=30)
+    commands.add_parser("modes")
+    commands.add_parser("comfort", help="Tailscale mode: reserved, not implemented or installed")
+    from .security_cli import configure, run
+    configure(commands)
     args = parser.parse_args()
-    if not 0 < args.timeout <= 300:
+    if hasattr(args, "timeout") and not 0 < args.timeout <= 300:
         parser.error("--timeout must be greater than 0 and at most 300")
     try:
-        if args.command == "cloud-inspect":
+        if args.command == "security":
+            raise SystemExit(run(args))
+        elif args.command == "modes":
+            print(json.dumps({"security": {"transport": "ssh", "available": True},
+                              "comfort": {"transport": "tailscale", "available": False}}))
+        elif args.command == "comfort":
+            parser.exit(2, "comfort mode is reserved. Tailscale is not installed or configured by this command.\n")
+        elif args.command == "cloud-inspect":
             print(json.dumps(asyncio.run(inspect_cloud())))
         elif args.command == "cloud-status":
             print(json.dumps(asyncio.run(cloud_status())))
@@ -83,7 +96,7 @@ def main():
             raise SystemExit(asyncio.run(cloud_probe(args.timeout)))
         else:
             asyncio.run(probe() if args.command == "probe" else demo())
-    except (RuntimeError, TimeoutError, OSError) as exc:
+    except (RuntimeError, TimeoutError, OSError, ValueError) as exc:
         parser.exit(1, f"codex-bridge: {exc}\n")
 
 

@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import io
 import json
+import os
 import socket
 import tempfile
 import unittest
@@ -19,7 +20,7 @@ except ImportError:
     unix_serve = None
 
 
-@unittest.skipUnless(unix_serve is not None and hasattr(socket, 'AF_UNIX'), 'diagnostics extra and Unix required')
+@unittest.skipUnless(unix_serve is not None and os.name != 'nt' and hasattr(socket, 'AF_UNIX'), 'diagnostics extra and Unix required')
 class DaemonSocketTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='codex-bridge-test-')

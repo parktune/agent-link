@@ -4,7 +4,7 @@ Python 3.11+. Base probe/demo has no third-party runtime dependencies.
 Install optional daemon diagnostics before running the full test suite:
 
 ```bash
-python3 -m pip install -e ".[diagnostics]"
+python3 -m pip install -e ".[security,diagnostics]"
 ``` Run:
 
 ```bash
@@ -41,3 +41,18 @@ git switch -c your-change
 Maintainers with push access can publish local commits using `git push origin main`.
 Do not put tokens in remote URLs. GitHub Actions runs deterministic tests without
 OpenAI secrets.
+
+
+## SSH security mode
+
+Run the deterministic suite on Windows and Ubuntu. It covers the durable mailbox,
+authentication and replay/state boundaries, subprocess framing/limits, and an
+actual MCP SDK stdio session. These tests do not install Tailscale, modify SSH
+configuration, contact remote hosts or call a model.
+
+The optional Linux `python scripts/verify_security_ssh.py` starts a temporary
+OpenSSH listener on loopback with temporary host/client keys and known_hosts.
+It does not touch system SSH or user keys. `--models` additionally invokes two
+actual Codex conversations using scoped synthetic MCP tool authorization in the
+temporary test processes. It consumes model usage; the regular CI does not run it.
+No actual company's server pair is assumed or auto-connected by tests.

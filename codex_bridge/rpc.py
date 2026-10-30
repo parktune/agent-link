@@ -114,10 +114,10 @@ class AppServer:
         finally:
             self.pending.pop(request_id, None)
 
-    async def start_thread(self, cwd):
+    async def start_thread(self, cwd, *, developer_instructions=None):
         result = await self.call("thread/start", {
             "cwd": str(cwd), "sandbox": "read-only", "approvalPolicy": "never",
-            "developerInstructions": "This is a conversation continuity test. Do not use tools. Reply briefly.",
+            "developerInstructions": developer_instructions or "This is a conversation continuity test. Do not use tools. Reply briefly.",
         })
         return result["thread"]["id"]
 

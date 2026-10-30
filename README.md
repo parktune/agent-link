@@ -1,85 +1,157 @@
 # Codex Bridge
 
-독립적인 Codex 대화 세션 사이의 작업 요청·응답을 위한 오픈소스 프로젝트입니다.
-현재 범위는 **Phase 1 기술 조사와 로컬 대화 유지 PoC**입니다. 인터넷 A2A 프레임워크 완성본은 아닙니다.
+각자의 대화 컨텍스트를 유지하는 Codex 세션 사이에서 작업 요청·결과를 교환합니다.
 
-## 시작
+| 모드 | 전송 | 현재 상태 |
+|---|---|---|
+| **security mode** (SSH mode) | 사용자가 승인한 기존 OpenSSH 경로 | 구현됨: 영속 수신함·양방향 작업·MCP 도구 |
+| **comfort mode** (Tailscale mode) | 편의 연결과 사설망 discovery | 예약됨, 이번 범위에서 미구현·미설치 |
 
-Python 3.11+와 로그인된 Codex CLI가 필요합니다. 검증 기준 버전은 `codex-cli 0.166.0`입니다.
+Security라는 이름은 회사 보안 승인을 대신하지 않습니다. SSH 경로는 사내에서 관리하고,
+클라우드 모델 입력에 포함할 업무 데이터 범위는 별도로 통제해야 합니다.
+
+## 설치
+
+양쪽 PC에 Python 3.11+, 기존 OpenSSH 접속 환경, Codex가 필요합니다.
+회사에서 승인한 패키지 설치 절차를 따르세요. 기본 전송 CLI는 표준 라이브러리만 사용하며
+MCP 통합을 위해 아래 extra를 설치합니다. Tailscale이나 별도 relay는 설치하지 않습니다.
+
+Ubuntu:
 
 ```bash
+git clone https://github.com/parktune/codex-bridge.git
+cd codex-bridge
 python3 -m venv .venv
-.venv/bin/python -m pip install -e .
-.venv/bin/codex-bridge probe
-.venv/bin/codex-bridge demo
+.venv/bin/python -m pip install -e '.[security]'
 ```
 
-설치 없이 저장소 루트에서 `python3 -m codex_bridge probe` 또는 `demo`도 가능합니다.
-`probe`는 별도 stdio App Server에서 thread를 생성·조회하며 모델을 호출하지 않습니다.
-`demo`는 실제 모델을 호출하므로 계정 사용량이 발생합니다. 두 App Server와 별도 임시 작업 디렉터리에서 A/B thread를 만들고, 각자의 무작위 기억 표식을 저장합니다. B→A hello/응답을 B에 반영한 뒤 각 thread의 기억을 확인하고, A→B 역방향 왕복도 수행합니다. 임시 작업 디렉터리는 삭제되지만 Codex에 저장된 테스트 대화 기록은 남을 수 있습니다.
+Windows PowerShell:
 
-출력은 task ID, 송수신자, thread ID를 포함하는 JSON Lines입니다. 마지막 `verification` 이벤트가 있어야 성공입니다. 실제 Codex 사용이 없는 테스트는 다음과 같습니다.
+```powershell
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -e '.[security]'
+```
+
+아래 `codex-bridge`는 Ubuntu의 `.venv/bin/codex-bridge`, Windows의
+`.venv\Scripts\codex-bridge.exe`를 뜻합니다. `codex-bridge modes`로 모드를 확인할 수 있습니다.
+
+## SSH mode: Ubuntu A ↔ Ubuntu B
+
+예시는 **B에서 A로 SSH 접속 가능한 경우**입니다. A에는 별도 웹 서버나 추가 수신 포트를 열지 않습니다.
+서버가 다르면 먼저 회사에서 승인한 SSH config 별칭 `server-a`를 준비하고, 키 인증과
+호스트 키 fingerprint를 확인하세요. bridge는 최초 호스트 키를 자동 수락하지 않으며
+`BatchMode=yes`, `StrictHostKeyChecking=yes`, agent/port forwarding 비활성화를 강제합니다.
+사내 SSH 설정 예시는 [상세 가이드](docs/security-mode.ko.md)에 있습니다.
+
+A에서:
 
 ```bash
-python3 -m unittest discover -s tests -v
+codex-bridge security init --name agent-a
+codex-bridge security pair-code
+# 5분 유효, 1회용 코드를 B 사용자에게 안전하게 전달
 ```
 
-## OpenAI 클라우드 연결 조사
-
-현재 우선 목표는 양쪽에서 OpenAI 클라우드로 outbound 연결하고 pairing code만으로
-접속하는 방식입니다. Tailscale/SSH나 별도 중계 서버를 필수 구성으로 두지 않습니다.
+B에서:
 
 ```bash
-.venv/bin/python -m pip install -e ".[diagnostics]"
-.venv/bin/codex-bridge cloud-status
-.venv/bin/codex-bridge cloud-inspect
-.venv/bin/codex-bridge cloud-probe --timeout 30
+codex-bridge security init --name agent-b
+codex-bridge security connect agent-a \
+  --ssh-host server-a \
+  --remote-python /absolute/path/to/codex-bridge/.venv/bin/python
+# A의 코드를 비표시 입력
+codex-bridge security peers
+codex-bridge security sync --watch
 ```
 
-`cloud-status`는 기존 daemon의 Unix WebSocket에 조회 전용으로 연결해 relay 상태를
-읽습니다. thread 조회·입력·실행, enable/disable, daemon 시작·종료는 수행하지 않습니다.
-`diagnostics` extra의 Python WebSocket 라이브러리만 필요하며 VPN은 설치하지 않습니다.
-`cloud-inspect`는 설치 CLI의 schema를 조사하며 클라우드에 연결하지 않습니다.
+`--remote-python`은 **A에 설치한 venv Python의 절대 경로**입니다. 사용자 이름이나 홈 경로를
+하드코딩하지 않습니다. Windows SSH 서버 대상은 `--remote-platform windows`와
+`C:\...\.venv\Scripts\python.exe`를 지정합니다.
 
-`cloud-probe`는 기존 daemon과 테스트 프로세스가 같은 installation을 사용하는지 먼저
-비교합니다. 기존 daemon의 Remote Control이 disabled가 아니면 두 번째 relay 소유자를
-만들지 않고 `reason: existing_relay_owner`, exit **2**로 건너뜁니다. 기존 상태를 확인할 수
-없으면 활성화하지 않고 실패합니다. 설치 ID는 메모리에서만 비교하고 출력하지 않습니다.
+한 번 등록하면 **B→A 요청뿐 아니라 A→B 요청도 같은 SSH 경로로 전달**합니다.
+B의 sync가 A의 수신함에 배달하고 A의 발신함을 가져오는 방식이므로 A가 B로 SSH 접속할 필요는 없습니다.
+B에서 지속적으로 `sync --watch`를 실행하면 양방향 메시지가 주기적으로 교환됩니다.
+기존 SSH 설정·서비스·방화벽·Codex daemon은 자동 변경하지 않습니다.
 
-안전 확인을 통과한 경우에만 별도 테스트 App Server에서 임시 활성화, 코드 발급,
-claimed 조회, relay 연결을 시험하고 임시 활성화를 해제합니다. 모델을 호출하지 않으며
-발급 코드·토큰·호스트 식별자는 출력하지 않습니다. Codex가 enrollment를 로컬 DB와
-클라우드에 저장할 수 있습니다. 인증 삭제·등록 취소나 daemon의 영구 설정 변경은 하지 않습니다.
+## 기존 Codex 대화에서 사용
 
-exit **0**은 호스트 측 시험 성공, **1**은 검사/정리 실패, **2**는 기존 relay 소유자 보호를
-위한 생략입니다. 어느 경우도 A2A 성공을 뜻하지 않습니다. 다른 서버가 코드를 입력하는
-클라이언트 기능은 아직 없습니다. [조사 결과](docs/relay-followup.ko.md)를 참고하세요.
+각 PC에서 해당 프로필을 MCP 도구로 등록합니다.
 
-## 현재 구현과 한계
+```bash
+codex-bridge security mcp-install
+```
 
-- App Server 초기화, thread 생성, turn 실행, 완료 이벤트 수신, 오류·연결 종료·시간 제한 처리
-- 두 독립 프로세스의 서로 다른 thread에서 대화 유지와 양방향 왕복 확인
-- 모델 응답과 프로토콜 오류를 구분하며, 서버 승인 요청은 자동 승인하지 않음
-- 기본 probe/demo는 표준 라이브러리 기반, daemon 조회는 선택적 diagnostics extra 사용, GitHub Actions 테스트
+이 명령을 사용자가 실행하면 `codex mcp add`로 현재 venv의 stdio 도구를 등록합니다.
+기존 같은 이름의 설정은 덮어쓰지 않습니다. Codex에서 MCP 목록을 새로 고치거나 재시작한 뒤 사용하세요.
 
-현재 메시지는 Python 프로그램이 중계합니다. Codex가 MCP 도구를 골라 자율적으로 요청하는 기능, 기존 사용 중인 TUI에 접속하는 기능, NAT 통과, 파일 전송, 영속 큐, 상호 인증은 아직 구현하지 않았습니다. 로컬 데모 성공을 두 서버 간 MVP 성공으로 간주하지 않습니다.
+B의 Codex:
 
-`AppServer(argv=[...])`는 JSONL stdio subprocess 전송 경계입니다.
-`codex app-server proxy`는 Unix socket의 원시 바이트를 전달하므로 WebSocket handshake가
-필요하며 현재 JSONL adapter와 직접 호환되지 않습니다. 기존 daemon/TUI 연결에는 별도
-WebSocket adapter와 동시 실행·승인·이벤트 처리가 필요합니다. 임의 peer에게 App Server
-연결이나 thread ID 선택 권한을 직접 제공하지 마세요. PoC의 read-only sandbox는
-신뢰할 수 없는 peer를 위한 완성된 격리 수단이 아닙니다.
+> bridge 도구로 agent-a에게 hello 작업을 요청하고 task ID를 알려줘.
 
-## 문서
+A의 Codex:
 
-- [기술 타당성·근거·판정](docs/feasibility.ko.md)
-- [아키텍처 비교 및 다음 단계](docs/architecture.ko.md)
-- [검증 결과](docs/validation.ko.md)
-- [원본 요구사항](docs/requirements.ko.md)
-- [개발 및 GitHub push](CONTRIBUTING.md)
-- [보안 경계](SECURITY.md)
+> bridge 수신함을 확인해. hello 요청에는 hello received로 응답해.
 
-## 라이선스
+도구는 `bridge_peers`, `bridge_send_task`, `bridge_receive`, `bridge_reply`,
+`bridge_task_status`, `bridge_ack`입니다. **현재 대화 안에서 도구를 호출하므로 thread를 새로
+만들거나 기존 세션을 다른 에이전트로 바꾸지 않습니다.**
 
-Apache-2.0. 원본 요구사항은 프로젝트 기획 문서이며, 외부 Codex 소스는 이 저장소에 포함하지 않습니다.
+요청 도착만으로 Codex를 자동 실행하거나 사용자 명령을 주입하지 않습니다.
+수신 측이 `bridge_receive`를 호출해야 하며, 원격 내용은 비신뢰 도구 출력으로 전달됩니다.
+`bridge_receive(wait_seconds=...)`는 최대 30초 대기를 요청할 수 있습니다. SSH 연결 자체의
+timeout은 별도로 적용됩니다. 대기·polling 주기는 회사 운영 정책에 맞추세요.
+
+## CLI로 통신 확인
+
+B에서:
+
+```bash
+codex-bridge security send agent-a 'hello'
+```
+
+A에서:
+
+```bash
+codex-bridge security receive
+codex-bridge security reply <task-id> 'hello received'
+```
+
+B에서:
+
+```bash
+codex-bridge security task <task-id>
+```
+
+요청마다 task ID, 이벤트마다 message ID가 있으며 완료 상태와 배달 상태를 구분합니다.
+연결이 끊기면 동일한 저장된 message ID로 재시도합니다. `security ack <message-id>`는
+로컬 읽음 확인이며 실행 승인이 아닙니다. `security prune`은 배달·읽음 조건을 만족한
+본문을 제거하고 재전송 방지용 tombstone을 남깁니다. `security revoke <peer>`는
+로컬 자격을 폐기합니다. 양방향 폐기에는 상대 PC에서도 revoke가 필요합니다.
+
+## 범위와 검증
+
+- 프로필별 SQLite 수신함, 만료·1회용 등록 코드, peer 토큰, ID 중복 방지, task 소유권·완료 상태 검증
+- SSH stdin/stdout만 사용. 임의 명령·파일 읽기·Codex turn 실행을 제공하는 원격 endpoint 없음
+- 기본 메시지 한도 8 KiB, 교환당 16개, live mailbox 10,000개, 제한된 subprocess 출력·실행 시간
+- 파일 전송, 자동 background Codex 실행, Tailscale mode는 아직 미구현
+- 실제 OpenSSH loopback의 양방향 작업 왕복과 MCP stdio handshake 검증. 별도 회사 서버 두 대 실측은 아직 미실시
+
+```bash
+python -m unittest discover -s tests -v
+# Linux, sshd와 기존 /run/sshd가 있는 환경의 임시 loopback 시험
+python scripts/verify_security_ssh.py
+# 실제 Codex 두 프로세스+MCP+SSH 통합 시험: 모델 사용량 발생
+python scripts/verify_security_ssh.py --models
+```
+
+모델 통합 시험은 임시 작업 디렉터리와 합성 hello만 사용하며, 시스템 SSH 설정이나 사용자 SSH 키를 변경하지 않습니다.
+생성된 Codex 테스트 대화 기록은 계정 로컬 기록에 남을 수 있습니다.
+[검증 기록](docs/validation.ko.md), [보안 경계](SECURITY.md)를 참고하세요.
+
+## 이전 조사와 PoC
+
+`probe` / `demo`는 기존 로컬 App Server PoC입니다. `cloud-*`는 OpenAI relay 조사용이며,
+security mode 실행 시 호출하지 않습니다. [기술 조사](docs/feasibility.ko.md),
+[클라우드 후속 조사](docs/relay-followup.ko.md), [원본 요구사항](docs/requirements.ko.md)을 보존합니다.
+OpenAI relay의 외부 pairing client 계약은 확인되지 않았고 현재 제품 경로가 아닙니다.
+
+Apache-2.0.

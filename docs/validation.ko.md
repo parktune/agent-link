@@ -54,3 +54,36 @@ GitHub CI는 모델을 호출하지 않는 프로토콜 테스트만 실행한�
 같은 installation의 기존 소유자가 있는 경우 cloud-probe가 enable/pairing 전에 exit 2로
 생략하는 실제 동작도 확인했다. 기존 daemon의 연결·environment는 실험 전후 동일했다.
 [상세 기록](relay-followup.ko.md)을 참고한다. 외부 클라이언트의 pairing 수락은 미검증이다.
+
+
+## Security mode (SSH), 2026-10-30
+
+- 실제 OpenSSH loopback, 임시 host/client key, strict known_hosts 검증: 양방향 task/result 통과.
+- 사용자 SSH config/authorized_keys, 시스템 sshd 서비스, 방화벽 변경 없음. 새 수신 포트는 loopback에만 임시 생성 후 종료.
+- 실제 MCP SDK stdio initialize / tools/list / tools/call 검증 통과.
+- 별도 CODEX_HOME의 공식 `codex mcp add/get` 등록 검증 통과. 사용자 Codex 설정은 변경하지 않음.
+- 실제 Codex 두 프로세스 + 서로 다른 thread + MCP 도구 + 실제 SSH loopback: 합성 hello와
+  reverse hello 양방향 완료, 각자의 무작위 대화 표식 유지·상대 표식 미포함 검증 통과.
+- 모델 시험에서는 임시 app-server의 테스트 도구 6개만 명시적으로 사전 허용했다.
+  제품의 mcp-install 및 사용자 전역 승인 설정은 완화하지 않는다.
+- Tailscale 실행 파일 설치·로그인·실행 없음. security mode는 OpenAI relay 진단도 호출하지 않음.
+- Windows/Ubuntu CI는 별도 matrix로 구성한다. 실제 Windows sshd와 별도 회사 서버 두 대는 미검증.
+
+실제 모델 시험의 최종 출력:
+
+```json
+{
+  "transport": "real OpenSSH loopback",
+  "actual_codex_processes": 2,
+  "distinct_threads": true,
+  "mcp_tools_called": true,
+  "bidirectional_tasks_completed": true,
+  "context_retained": true,
+  "system_ssh_modified": false,
+  "models_called": true
+}
+```
+
+재현: `python scripts/verify_security_ssh.py --models` (로그인된 Codex, Linux sshd, 기존 /run/sshd 필요).
+regular CI는 모델을 호출하지 않는다. 최종 로컬 자동 테스트 40개 통과. 입력 위조·타 peer ack·
+prune 후 재전송·실패 배치 rollback·기한 만료·정상 키 검증·Windows 명령 quoting·UTF-8 교환을 포함한다.
