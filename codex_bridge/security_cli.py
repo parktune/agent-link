@@ -22,7 +22,7 @@ def configure(subparsers):
     connect.add_argument('alias')
     connect.add_argument('--ssh-host', required=True, help='An already verified OpenSSH config alias')
     connect.add_argument('--remote-python', required=True, help='Absolute remote venv Python executable')
-    connect.add_argument('--remote-platform', choices=['posix', 'windows'], default='posix')
+    connect.add_argument('--remote-platform', choices=['posix'], default='posix', help='Ubuntu/POSIX only; Windows support is deferred')
     connect.add_argument('--remote-profile', default='default')
     connect.add_argument('--ssh-config', type=Path)
     commands.add_parser('peers')

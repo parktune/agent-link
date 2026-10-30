@@ -1,4 +1,6 @@
-# Security mode (SSH): 운영 가이드
+# Security mode (SSH): Ubuntu 운영 가이드
+
+현재 지원 범위는 Ubuntu ↔ Ubuntu이며 Windows 지원은 추후 검토한다.
 
 ## 모드 경계
 
@@ -14,7 +16,7 @@ Security라는 이름은 감사·인증·망분리 보장을 뜻하지 않는다
   `ssh-keyscan` 결과만으로 호스트를 신뢰하지 않는다.
 - ssh config와 remote Python path는 신뢰된 로컬 사용자가 선택하며, MCP나 원격 메시지가 수정할 수 없다.
 
-`~/.ssh/config` 예시 (Windows는 사용자 프로필의 `.ssh/config`):
+`~/.ssh/config` 예시:
 
 ```sshconfig
 Host server-a
@@ -45,20 +47,15 @@ A에는 B를 inbound peer로 기록하고 B에는 A로 향하는 SSH route를 �
 하나의 route에서 B가 양쪽 mailbox를 교환하므로 A가 B로 SSH 접속할 필요가 없다.
 A의 peers에 표시되는 B alias는 B의 init name이며, 이름 충돌 시 UUID로 표시한다.
 
-## 프로필과 Windows
+## 프로필과 상태 경로
 
 `security --profile corporate ...`로 프로필을 분리할 수 있다. 옵션은 하위 명령보다 먼저 둔다.
 다른 프로필에 접속하려면 connect에 `--remote-profile corporate`를 추가한다.
 신뢰된 로컬 상태 경로를 바꾸려면 `security --state-dir /trusted/parent ...`를 사용한다.
-기본 경로는 Ubuntu `$XDG_STATE_HOME/codex-bridge/<profile>` 또는
-`~/.local/state/codex-bridge/<profile>`, Windows `%LOCALAPPDATA%\codex-bridge\<profile>`이다.
-Ubuntu 디렉터리 0700/DB 0600, Windows는 현재 사용자 SID와 SYSTEM ACL로 보호한다.
-암호화 저장소는 아니므로 BitLocker/LUKS 등 회사 정책을 따로 적용한다.
-
-Windows 서버를 대상으로는 remote Python 절대 경로와 `--remote-platform windows`를 지정한다.
-고정된 endpoint 실행 명령은 PowerShell `-EncodedCommand`에 UTF-16LE로 인코딩한다.
-이것은 인자 quoting을 위한 것으로 비밀 암호화가 아니다. 비밀·메시지는 SSH stdin으로 전송한다.
-Windows OpenSSH Server와 PowerShell이 준비되어 있어야 한다. bridge는 서버 설치나 관리자 정책을 변경하지 않는다.
+기본 경로는 `$XDG_STATE_HOME/codex-bridge/<profile>` 또는
+`~/.local/state/codex-bridge/<profile>`이다. 디렉터리 0700/DB 0600으로 보호한다.
+암호화 저장소는 아니므로 LUKS 등 회사 정책을 따로 적용한다.
+Windows 관련 후보 구현은 현재 지원·운영 검증 범위가 아니며 connect CLI에서 Windows 대상을 제공하지 않는다.
 
 ## 배달과 작업 실행
 
@@ -113,4 +110,4 @@ SSH 키와 기존 SSH session은 별도로 관리한다. 인증 실패가 자동
 
 현재 자동 테스트와 실제 OpenSSH **loopback** 검증은 서로 다른 물리 서버 검증을 대체하지 않는다.
 실제 A/B에서는 위 절차대로 등록한 후 양방향 hello task/result, 재연결, revoke 거부를 확인한다.
-Windows unit/MCP 테스트와 명령 인코딩 테스트도 실제 Windows sshd 서버 접속을 보장하지 않는다.
+Windows 지원은 이번 작업 범위에서 제외했다. CI는 Ubuntu의 Python 3.11/3.13을 검증한다.

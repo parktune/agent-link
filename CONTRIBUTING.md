@@ -45,7 +45,8 @@ OpenAI secrets.
 
 ## SSH security mode
 
-Run the deterministic suite on Windows and Ubuntu. It covers the durable mailbox,
+Run the deterministic suite on Ubuntu (Python 3.11 and 3.13). Windows support
+and its CI matrix are deferred by project scope. It covers the durable mailbox,
 authentication and replay/state boundaries, subprocess framing/limits, and an
 actual MCP SDK stdio session. These tests do not install Tailscale, modify SSH
 configuration, contact remote hosts or call a model.

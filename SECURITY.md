@@ -2,6 +2,7 @@
 
 ## Security mode (SSH)
 
+Current support is Ubuntu to Ubuntu; Windows support is deferred.
 This mode uses an existing, administrator-approved OpenSSH route. It creates no
 public listener, VPN, cloud relay or network discovery service. Host key checking
 and noninteractive public-key authentication are mandatory; unknown host keys are
@@ -47,8 +48,8 @@ Bilateral revocation requires both profiles to revoke. SSH keys/sessions remain
 separately administered.
 
 This is a new implementation, not an independently audited enterprise product.
-Windows command quoting, Unicode, state ACL and MCP tests do not replace a real
-Windows SSH server rollout test. Use approved non-sensitive pilot data first.
+The Windows candidate code is not a supported or validated rollout path.
+The current connect CLI accepts only POSIX targets. Use approved non-sensitive pilot data first.
 
 ## Comfort mode
 

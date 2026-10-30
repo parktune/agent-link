@@ -12,6 +12,7 @@ Security라는 이름은 회사 보안 승인을 대신하지 않습니다. SSH 
 
 ## 설치
 
+**현재 지원 범위는 Ubuntu ↔ Ubuntu입니다.** Windows 지원은 추후 검토합니다.
 양쪽 PC에 Python 3.11+, 기존 OpenSSH 접속 환경, Codex가 필요합니다.
 회사에서 승인한 패키지 설치 절차를 따르세요. 기본 전송 CLI는 표준 라이브러리만 사용하며
 MCP 통합을 위해 아래 extra를 설치합니다. Tailscale이나 별도 relay는 설치하지 않습니다.
@@ -25,15 +26,8 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[security]'
 ```
 
-Windows PowerShell:
-
-```powershell
-py -3 -m venv .venv
-.venv\Scripts\python.exe -m pip install -e '.[security]'
-```
-
-아래 `codex-bridge`는 Ubuntu의 `.venv/bin/codex-bridge`, Windows의
-`.venv\Scripts\codex-bridge.exe`를 뜻합니다. `codex-bridge modes`로 모드를 확인할 수 있습니다.
+아래 `codex-bridge`는 `.venv/bin/codex-bridge`를 뜻합니다.
+`codex-bridge modes`로 모드를 확인할 수 있습니다.
 
 ## SSH mode: Ubuntu A ↔ Ubuntu B
 
@@ -64,8 +58,7 @@ codex-bridge security sync --watch
 ```
 
 `--remote-python`은 **A에 설치한 venv Python의 절대 경로**입니다. 사용자 이름이나 홈 경로를
-하드코딩하지 않습니다. Windows SSH 서버 대상은 `--remote-platform windows`와
-`C:\...\.venv\Scripts\python.exe`를 지정합니다.
+하드코딩하지 않습니다. 현재 connect 명령은 Ubuntu/POSIX 서버만 대상으로 합니다.
 
 한 번 등록하면 **B→A 요청뿐 아니라 A→B 요청도 같은 SSH 경로로 전달**합니다.
 B의 sync가 A의 수신함에 배달하고 A의 발신함을 가져오는 방식이므로 A가 B로 SSH 접속할 필요는 없습니다.

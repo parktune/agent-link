@@ -93,3 +93,10 @@ Windows state ACL은 기존 소유권을 변경하지 않고 DACL만 현재 사�
 Windows 전용 regression은 사전에 명시적 Everyone ACE가 있던 디렉터리·DB에서도 해당 권한이
 제거되는지 검사한다. SSH 동기화 도중 로컬에서 peer를 폐기하면 응답을 수신함에 반영하지 않는
 경계도 테스트한다. CI의 Windows job에서는 Unix daemon socket 전용 검사 5개를 제외한다.
+
+
+### 최종 지원 범위 수정
+
+사용자 후속 지시에 따라 Windows 지원·CI 검토는 보류한다. 최종 대상은 Ubuntu ↔ Ubuntu이며
+Ubuntu Python 3.11/3.13 CI를 기준으로 한다. 이전 Windows CI 실패·호환성 수정 기록이
+Windows 지원 완료를 뜻하지 않는다. CLI는 POSIX remote platform만 제공한다.
