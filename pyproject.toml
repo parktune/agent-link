@@ -9,6 +9,9 @@ description = "Feasibility-first bridge for independent Codex conversations"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 
+[project.optional-dependencies]
+diagnostics = ["websockets>=15,<17"]
+
 [project.scripts]
 codex-bridge = "codex_bridge.__main__:main"
 

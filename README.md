@@ -30,28 +30,37 @@ python3 -m unittest discover -s tests -v
 접속하는 방식입니다. Tailscale/SSH나 별도 중계 서버를 필수 구성으로 두지 않습니다.
 
 ```bash
+.venv/bin/python -m pip install -e ".[diagnostics]"
+.venv/bin/codex-bridge cloud-status
 .venv/bin/codex-bridge cloud-inspect
 .venv/bin/codex-bridge cloud-probe --timeout 30
 ```
 
-`cloud-inspect`는 설치된 CLI가 생성한 실험적 App Server schema를 조사하며 클라우드에
-연결하지 않습니다. `cloud-probe`는 별도 테스트 App Server에서 임시 Remote Control
-활성화, 코드 발급, claimed 조회, relay 연결을 시험하고 종료 시 임시 활성화를 해제합니다.
-모델을 호출하지 않으며 발급 코드·토큰·호스트 식별자는 출력하지 않습니다. Codex가
-호스트 enrollment를 로컬 DB와 클라우드에 저장할 수 있습니다. 이 명령은 인증 정보 삭제나
-등록 취소를 수행하지 않으며, daemon의 영구 활성화 설정을 변경하지 않습니다.
+`cloud-status`는 기존 daemon의 Unix WebSocket에 조회 전용으로 연결해 relay 상태를
+읽습니다. thread 조회·입력·실행, enable/disable, daemon 시작·종료는 수행하지 않습니다.
+`diagnostics` extra의 Python WebSocket 라이브러리만 필요하며 VPN은 설치하지 않습니다.
+`cloud-inspect`는 설치 CLI의 schema를 조사하며 클라우드에 연결하지 않습니다.
 
-성공 exit code 0은 **호스트 측 시험 성공**을 뜻합니다. 출력의 `a2a_verified`는 여전히
-false이며 다른 서버가 코드를 입력해 접속하는 클라이언트 기능은 아직 없습니다.
-실패 exit code 1에서는 `failed_stage`, `error_category`, `cleanup`을 확인합니다.
-[실제 결과와 남은 과제](docs/cloud-research.ko.md)를 참고하세요.
+`cloud-probe`는 기존 daemon과 테스트 프로세스가 같은 installation을 사용하는지 먼저
+비교합니다. 기존 daemon의 Remote Control이 disabled가 아니면 두 번째 relay 소유자를
+만들지 않고 `reason: existing_relay_owner`, exit **2**로 건너뜁니다. 기존 상태를 확인할 수
+없으면 활성화하지 않고 실패합니다. 설치 ID는 메모리에서만 비교하고 출력하지 않습니다.
+
+안전 확인을 통과한 경우에만 별도 테스트 App Server에서 임시 활성화, 코드 발급,
+claimed 조회, relay 연결을 시험하고 임시 활성화를 해제합니다. 모델을 호출하지 않으며
+발급 코드·토큰·호스트 식별자는 출력하지 않습니다. Codex가 enrollment를 로컬 DB와
+클라우드에 저장할 수 있습니다. 인증 삭제·등록 취소나 daemon의 영구 설정 변경은 하지 않습니다.
+
+exit **0**은 호스트 측 시험 성공, **1**은 검사/정리 실패, **2**는 기존 relay 소유자 보호를
+위한 생략입니다. 어느 경우도 A2A 성공을 뜻하지 않습니다. 다른 서버가 코드를 입력하는
+클라이언트 기능은 아직 없습니다. [조사 결과](docs/relay-followup.ko.md)를 참고하세요.
 
 ## 현재 구현과 한계
 
 - App Server 초기화, thread 생성, turn 실행, 완료 이벤트 수신, 오류·연결 종료·시간 제한 처리
 - 두 독립 프로세스의 서로 다른 thread에서 대화 유지와 양방향 왕복 확인
 - 모델 응답과 프로토콜 오류를 구분하며, 서버 승인 요청은 자동 승인하지 않음
-- 표준 라이브러리 기반 런타임, GitHub Actions 테스트
+- 기본 probe/demo는 표준 라이브러리 기반, daemon 조회는 선택적 diagnostics extra 사용, GitHub Actions 테스트
 
 현재 메시지는 Python 프로그램이 중계합니다. Codex가 MCP 도구를 골라 자율적으로 요청하는 기능, 기존 사용 중인 TUI에 접속하는 기능, NAT 통과, 파일 전송, 영속 큐, 상호 인증은 아직 구현하지 않았습니다. 로컬 데모 성공을 두 서버 간 MVP 성공으로 간주하지 않습니다.
 

@@ -45,3 +45,12 @@ python3 -m codex_bridge demo
 ```
 
 GitHub CI는 모델을 호출하지 않는 프로토콜 테스트만 실행한다.
+
+
+## 클라우드 후속 검증
+
+조회 전용 Unix WebSocket adapter를 포함한 전체 테스트 20개 통과.
+기존 daemon의 relay 상태 connected, 별도 프로세스와 같은 installation 사용을 확인했다.
+같은 installation의 기존 소유자가 있는 경우 cloud-probe가 enable/pairing 전에 exit 2로
+생략하는 실제 동작도 확인했다. 기존 daemon의 연결·environment는 실험 전후 동일했다.
+[상세 기록](relay-followup.ko.md)을 참고한다. 외부 클라이언트의 pairing 수락은 미검증이다.

@@ -142,13 +142,40 @@ async def probe_host(server, emit, timeout=30):
     return report
 
 
+def relay_owner_conflict(daemon, candidate):
+    if daemon["status"] == "disabled":
+        return False
+    if not daemon.get("installationId") or not candidate.get("installationId"):
+        raise RuntimeError("Cannot compare relay installation identities")
+    return daemon["installationId"] == candidate["installationId"]
+
+
 async def cloud_probe(timeout=30):
     def emit(value):
         print(json.dumps(value), flush=True)
 
-    # A separate process, not `app-server proxy` into a user's active daemon.
+    from .daemon import DaemonUnavailable, read_daemon_status, summary
+
+    try:
+        info, daemon = await read_daemon_status()
+    except DaemonUnavailable:
+        info, daemon = None, None
+    except Exception:
+        emit({"type": "cloud_probe", "host_probe": "not_run", "a2a_verified": False,
+              "failed_stage": "daemon_preflight",
+              "reason": "Cannot safely inspect daemon. Install .[diagnostics] and run cloud-status."})
+        return 1
+
+    # Never create another relay owner for a live installation.
     env = {**os.environ, "RUST_LOG": "codex_app_server_transport=warn", "LOG_FORMAT": "json"}
     async with AppServer(timeout=45, experimental=True, env=env) as server:
+        candidate = await server.call("remoteControl/status/read", {})
+        if daemon is not None and relay_owner_conflict(daemon, candidate):
+            emit({"type": "cloud_probe", "host_probe": "not_run",
+                  "reason": "existing_relay_owner", "same_installation": True,
+                  "daemon": summary(info, daemon), "a2a_verified": False,
+                  "remote_control_mutated": False, "pairing_code_issued": False})
+            return 2
         report = await probe_host(server, emit, timeout)
     emit(report)
     if report["host_probe"] != "passed" or report["cleanup"] != "passed":

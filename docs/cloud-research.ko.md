@@ -1,5 +1,8 @@
 # OpenAI 클라우드만 사용하는 pairing 경로 검증
 
+> 후속 검증: 기존 daemon의 relay 연결은 connected이며, 조회 전용 Unix WebSocket adapter로 확인했다.
+> 중복 호스트 방지와 공개 클라이언트 추가 조사 결과는 [후속 기록](relay-followup.ko.md)을 참고한다.
+
 조사·실행: 2026-10-30. 설치 CLI 0.166.0.
 
 ## 목표와 합격 기준
@@ -86,7 +89,8 @@ Tailscale/자체 relay로 자동 전환하지 않는다. 공식 경로가 확인
 .venv/bin/codex-bridge cloud-probe --timeout 30
 ```
 
-호스트 측 검사만 모두 성공하면 exit 0, 검사/정리 실패 시 exit 1이다.
+현재 버전은 기존 daemon 소유권을 먼저 검사하며, 같은 installation의 소유자가 있으면 exit 2로 생략한다.
+호스트 측 검사 성공은 exit 0, 검사/정리 실패는 exit 1이다.
 코드 수락 기능이 구현되거나 A2A 왕복이 성공했다는 뜻이 아니다.
 
 ## 근거
@@ -101,10 +105,11 @@ Tailscale/자체 relay로 자동 전환하지 않는다. 공식 경로가 확인
 
 ## 로컬 adapter 추가 확인
 
-기존 daemon을 건드리지 않고 `app-server proxy`로 초기화를 시험했으나 JSONL adapter의
+초기에는 기존 daemon을 건드리지 않고 `app-server proxy`로 초기화를 시험했으나 JSONL adapter의
 initialize가 timeout 되었다. 소스상 proxy는 `codex_stdio_to_uds::run`으로 원시 socket bytes를
 전달한다. daemon의 Unix socket은 WebSocket handshake를 요구하므로 JSONL을 직접 쓰는
 현재 adapter와 호환되지 않는다. 이전 README의 proxy 호환 가능 표현을 수정했다.
+후속 작업에서는 조회 전용 Unix WebSocket adapter를 구현해 기존 daemon 초기화와 status 조회가 성공했다.
 기존 thread에는 메시지를 보내지 않았고 daemon 재시작도 하지 않았다.
 
 ## 자동 테스트

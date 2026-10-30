@@ -23,3 +23,12 @@ codes, credentials, or raw upstream errors. It disables its temporary Remote Con
 state on exit and terminates its subprocess; enrollment records and unexpired pairing
 artifacts may remain in Codex/cloud storage. It does not revoke clients or remove
 credentials. A host-side probe passing is not proof of safe A2A authorization.
+
+
+Daemon diagnostics use a local Unix WebSocket with a strict method allowlist:
+initialization and `remoteControl/status/read`. This helper cannot start turns,
+list conversations, grant approvals, change Remote Control, or stop the daemon.
+It compares installation IDs only in memory. Before starting a temporary cloud
+host, diagnostics check for an existing owner using the same installation and skip
+if one is active; an unreadable daemon fails closed. This is a snapshot check,
+not an atomic cloud lease or a guarantee against another process starting later.

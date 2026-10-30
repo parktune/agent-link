@@ -1,6 +1,11 @@
 # Development
 
-Python 3.11+, no third-party runtime dependencies. Run:
+Python 3.11+. Base probe/demo has no third-party runtime dependencies.
+Install optional daemon diagnostics before running the full test suite:
+
+```bash
+python3 -m pip install -e ".[diagnostics]"
+``` Run:
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -14,7 +19,9 @@ Do not change another active conversation or publish account information in test
 ## Cloud diagnostics
 
 `python3 -m codex_bridge cloud-inspect` reads schemas from the installed CLI without
-contacting the relay. `cloud-probe` contacts OpenAI using official experimental RPCs;
+contacting the relay. `cloud-status` reads the running daemon through its Unix WebSocket without modifying
+Remote Control state. `cloud-probe` checks for an existing relay owner first (exit 2
+means skipped to avoid a conflict). When safe, it contacts OpenAI using official experimental RPCs;
 it temporarily enables Remote Control on a separate App Server and creates a pairing
 artifact. It does not call a model. Run it only in an appropriate logged-in environment.
 Tests in CI simulate RPC results and do not contact the cloud.

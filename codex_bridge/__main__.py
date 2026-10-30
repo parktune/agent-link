@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .rpc import AppServer
 from .cloud import cloud_probe, inspect_cloud
+from .daemon import cloud_status
 
 
 async def probe():
@@ -68,7 +69,7 @@ async def demo():
 
 def main():
     parser = argparse.ArgumentParser(description="Codex Bridge feasibility PoC")
-    parser.add_argument("command", choices=["probe", "demo", "cloud-inspect", "cloud-probe"])
+    parser.add_argument("command", choices=["probe", "demo", "cloud-inspect", "cloud-probe", "cloud-status"])
     parser.add_argument("--timeout", type=float, default=30, help="Cloud relay connection deadline in seconds")
     args = parser.parse_args()
     if not 0 < args.timeout <= 300:
@@ -76,6 +77,8 @@ def main():
     try:
         if args.command == "cloud-inspect":
             print(json.dumps(asyncio.run(inspect_cloud())))
+        elif args.command == "cloud-status":
+            print(json.dumps(asyncio.run(cloud_status())))
         elif args.command == "cloud-probe":
             raise SystemExit(asyncio.run(cloud_probe(args.timeout)))
         else:
