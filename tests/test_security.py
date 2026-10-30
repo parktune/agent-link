@@ -236,3 +236,29 @@ class BoundaryTests(unittest.TestCase):
                 code = store.pair_code()
             with self.assertRaises(PermissionError):
                 store.enroll(str(uuid.uuid4()), 'peer', code)
+
+
+@unittest.skipUnless(os.name == 'nt', 'Windows DACL regression test')
+class WindowsAclTests(unittest.TestCase):
+    def test_existing_explicit_everyone_permissions_are_removed(self):
+        import base64
+        import subprocess
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root, 'default')
+            folder.mkdir()
+            db_path = folder / 'security.sqlite3'
+            db_path.touch()
+            for target in (folder, db_path):
+                subprocess.run(['icacls', str(target), '/grant', '*S-1-1-0:F'], capture_output=True, check=True)
+            store = Store(root)
+            for target in (store.root, store.path):
+                literal = str(target).replace("'", "''")
+                script = (f"$acl=Get-Acl -LiteralPath '{literal}'; "
+                          "$owner=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
+                          "$rules=@($acl.Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }); "
+                          "@{owner=$owner; rules=$rules; protected=$acl.AreAccessRulesProtected}|ConvertTo-Json -Compress")
+                encoded = base64.b64encode(script.encode('utf-16-le')).decode()
+                result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], capture_output=True, text=True, check=True)
+                acl = json.loads(result.stdout)
+                self.assertTrue(acl['protected'])
+                self.assertEqual(set(acl['rules']), {acl['owner'], 'S-1-5-18'})

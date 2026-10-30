@@ -46,22 +46,21 @@ def private_directory(path):
 def windows_acl(path, *, directory=False):
     # Replace the DACL, rather than retaining any preexisting explicit Everyone ACE.
     path_literal = str(path).replace("'", "''")
-    security_type = 'DirectorySecurity' if directory else 'FileSecurity'
-    inherit = 'ContainerInherit, ObjectInherit' if directory else 'None'
+    inherit = 'OICI' if directory else ''
     script = (
         "$ErrorActionPreference='Stop'; "
-        "$owner=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; "
-        f"$acl=New-Object System.Security.AccessControl.{security_type}; "
-        "$acl.SetOwner($owner); $acl.SetAccessRuleProtection($true,$false); "
-        "$system=[System.Security.Principal.SecurityIdentifier]::new('S-1-5-18'); "
-        "foreach($sid in @($owner,$system)){ "
-        f"$rule=[System.Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','{inherit}','None','Allow'); "
-        "$acl.AddAccessRule($rule) }; "
+        "$owner=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
+        f"$acl=Get-Acl -LiteralPath '{path_literal}'; "
+        f"$sddl='D:P(A;{inherit};FA;;;' + $owner + ')(A;{inherit};FA;;;SY)'; "
+        "$acl.SetSecurityDescriptorSddlForm($sddl,[System.Security.AccessControl.AccessControlSections]::Access); "
         f"Set-Acl -LiteralPath '{path_literal}' -AclObject $acl"
     )
     encoded = base64.b64encode(script.encode('utf-16-le')).decode()
-    subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
-                   capture_output=True, timeout=15, check=True)
+    result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+                            capture_output=True, timeout=15)
+    if result.returncode:
+        detail = result.stderr.decode('utf-8', errors='replace').replace(str(path), '<state>')
+        raise RuntimeError('Cannot restrict Windows state permissions: ' + detail[-1500:])
 
 
 def default_root():
@@ -358,6 +357,8 @@ class Store:
         self._batch(response['messages'], response['acked'])
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
+            if not db.execute("SELECT 1 FROM peers WHERE id=? AND direction='ssh' AND revoked=0", (peer_id,)).fetchone():
+                raise PermissionError('Peer was revoked during exchange')
             for message in response['messages']:
                 validate_message(message)
                 if message['sender'] != peer_id or message['recipient'] != own:
