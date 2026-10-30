@@ -24,6 +24,28 @@ python3 -m venv .venv
 python3 -m unittest discover -s tests -v
 ```
 
+## OpenAI 클라우드 연결 조사
+
+현재 우선 목표는 양쪽에서 OpenAI 클라우드로 outbound 연결하고 pairing code만으로
+접속하는 방식입니다. Tailscale/SSH나 별도 중계 서버를 필수 구성으로 두지 않습니다.
+
+```bash
+.venv/bin/codex-bridge cloud-inspect
+.venv/bin/codex-bridge cloud-probe --timeout 30
+```
+
+`cloud-inspect`는 설치된 CLI가 생성한 실험적 App Server schema를 조사하며 클라우드에
+연결하지 않습니다. `cloud-probe`는 별도 테스트 App Server에서 임시 Remote Control
+활성화, 코드 발급, claimed 조회, relay 연결을 시험하고 종료 시 임시 활성화를 해제합니다.
+모델을 호출하지 않으며 발급 코드·토큰·호스트 식별자는 출력하지 않습니다. Codex가
+호스트 enrollment를 로컬 DB와 클라우드에 저장할 수 있습니다. 이 명령은 인증 정보 삭제나
+등록 취소를 수행하지 않으며, daemon의 영구 활성화 설정을 변경하지 않습니다.
+
+성공 exit code 0은 **호스트 측 시험 성공**을 뜻합니다. 출력의 `a2a_verified`는 여전히
+false이며 다른 서버가 코드를 입력해 접속하는 클라이언트 기능은 아직 없습니다.
+실패 exit code 1에서는 `failed_stage`, `error_category`, `cleanup`을 확인합니다.
+[실제 결과와 남은 과제](docs/cloud-research.ko.md)를 참고하세요.
+
 ## 현재 구현과 한계
 
 - App Server 초기화, thread 생성, turn 실행, 완료 이벤트 수신, 오류·연결 종료·시간 제한 처리
@@ -33,7 +55,12 @@ python3 -m unittest discover -s tests -v
 
 현재 메시지는 Python 프로그램이 중계합니다. Codex가 MCP 도구를 골라 자율적으로 요청하는 기능, 기존 사용 중인 TUI에 접속하는 기능, NAT 통과, 파일 전송, 영속 큐, 상호 인증은 아직 구현하지 않았습니다. 로컬 데모 성공을 두 서버 간 MVP 성공으로 간주하지 않습니다.
 
-`AppServer(argv=[...])`는 subprocess 전송 경계를 제공합니다. 기존 daemon 연결을 위한 `codex app-server proxy --sock PATH`를 넣을 수 있지만, 실제 사용 중인 thread의 동시 실행·승인·이벤트 처리는 별도 검증 대상입니다. 임의 peer에게 App Server 연결이나 thread ID 선택 권한을 직접 제공하지 마세요. PoC의 read-only sandbox는 신뢰할 수 없는 peer를 위한 완성된 격리 수단이 아닙니다.
+`AppServer(argv=[...])`는 JSONL stdio subprocess 전송 경계입니다.
+`codex app-server proxy`는 Unix socket의 원시 바이트를 전달하므로 WebSocket handshake가
+필요하며 현재 JSONL adapter와 직접 호환되지 않습니다. 기존 daemon/TUI 연결에는 별도
+WebSocket adapter와 동시 실행·승인·이벤트 처리가 필요합니다. 임의 peer에게 App Server
+연결이나 thread ID 선택 권한을 직접 제공하지 마세요. PoC의 read-only sandbox는
+신뢰할 수 없는 peer를 위한 완성된 격리 수단이 아닙니다.
 
 ## 문서
 

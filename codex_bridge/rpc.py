@@ -12,13 +12,16 @@ class RpcError(RuntimeError):
 class AppServer:
     """One connection, serialized calls/turns. Never expose this directly to peers.
 
-    argv may target a fresh stdio server or `codex app-server proxy --sock ...`.
-    Proxying an existing daemon is opt-in; this client does not discover sessions.
+    argv must target a JSONL stdio server. `codex app-server proxy` forwards raw
+    Unix-socket bytes and requires a WebSocket handshake; it is not compatible.
+    This client does not discover or attach to existing sessions.
     """
 
-    def __init__(self, argv=None, timeout=120):
+    def __init__(self, argv=None, timeout=120, *, experimental=False, env=None):
         self.argv = argv or ["codex", "app-server", "--stdio"]
         self.timeout = timeout
+        self.env = env
+        self.experimental = experimental
         self.process = None
         self.pending = {}
         self.events = asyncio.Queue(maxsize=4096)
@@ -30,14 +33,14 @@ class AppServer:
         self.process = await asyncio.create_subprocess_exec(
             *self.argv, stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            limit=8 * 1024 * 1024,
+            limit=8 * 1024 * 1024, env=self.env,
         )
         self.reader = asyncio.create_task(self._read())
         self.err_reader = asyncio.create_task(self._stderr())
         try:
             await self.call("initialize", {
                 "clientInfo": {"name": "codex_bridge", "version": "0.1.0"},
-                "capabilities": {"experimentalApi": False},
+                "capabilities": {"experimentalApi": self.experimental},
             })
             await self._send({"method": "initialized"})
         except BaseException:

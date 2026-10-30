@@ -16,8 +16,8 @@ Unverified는 실행 검증 전이다. Unsupported가 기술적인 불가능을 
 | 실행 중인 기존 TUI thread에 입력 전달 | Experimental / Unverified | queue CLI와 thread/queue/add 구현 존재. 실제 사용 중인 TUI에 주입하지 않음 |
 | 저장된 thread 재개 | Experimental / Unverified | thread/resume. 재개와 활성 세션 공유는 구분 필요 |
 | 다른 서버에서 App Server 접근 | Experimental / Unverified | --remote ws/wss/unix, 인증 옵션 존재. 두 물리 서버 검증 전 |
-| remote-control start/pair | Experimental | CLI help와 공개 소스 확인. 이번 작업에서 daemon 변경·pair 코드 발급은 하지 않음 |
-| Pairing Code로 외부 A2A 클라이언트 연결 | Unsupported | 외부 클라이언트용 공개 연결 계약을 찾지 못함. 발급 API 존재만으로 사용 가능 판정 금지 |
+| remote-control start/pair | Experimental | CLI help와 공개 소스 확인. 초기 조사에서는 발급하지 않음. 후속 cloud-probe에서 별도 호스트 코드 발급 성공 |
+| Pairing Code로 외부 A2A 클라이언트 연결 | Unverified / 공개 지원 미확인 | 현재 우선 조사 대상. 코드 수락용 외부 클라이언트 계약을 찾지 못함. [후속 실제 시험](cloud-research.ko.md) |
 | 같은 계정의 원격 머신 열거·임의 relay 메시지 | Unverified / 채택 제외 | 임의 A2A용 공식 API 확인 못 함 |
 | MCP 도구 통합 | Supported / 프로젝트 미구현 | codex mcp CLI 존재. 설치 설정 변경은 하지 않음 |
 | Codex SDK | Supported / 미채택 | 프로그래밍용 인터페이스. 활성 TUI 세션 공유를 자동 보장하지 않음 |
@@ -37,12 +37,14 @@ Pairing 요청은 enrollment의 서버 토큰으로 인증된다. 로그인 계�
 이 프로젝트는 내부 backend endpoint를 호출하거나 토큰을 추출·재사용하지 않는다.
 
 검증 수준은 CLI help, 공개 소스 정적 분석, 로컬 App Server 프로토콜 실행이다.
-공식 relay의 패킷 캡처나 외부 클라이언트 접속 시험은 하지 않았다.
+후속 cloud-probe에서는 공식 RPC로 실제 코드 발급·상태 조회 및 relay 접속을 시험했다.
+[후속 검증 기록](cloud-research.ko.md)을 참고한다. 패킷 캡처나 외부 클라이언트 접속은 하지 않았다.
 
 ## 기존 대화 컨텍스트
 
 가장 직접적인 경로는 **그 thread를 소유한 App Server**에 접속하는 것이다.
-`codex app-server proxy --sock PATH`는 daemon control socket을 stdio로 연결한다.
+`codex app-server proxy --sock PATH`는 daemon control socket의 원시 바이트를 stdio로 연결한다.
+이 경로는 WebSocket handshake가 필요하므로 JSONL stdio adapter에 직접 넣을 수 없다.
 `thread/resume`는 저장된 대화를 재개하는 기능이다. 별도 프로세스에서 같은 파일을
 읽는 것을 활성 TUI runtime 공유로 오인하면 안 된다.
 

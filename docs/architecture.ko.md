@@ -4,13 +4,24 @@
 
 | 대안 | 장점 | 단점 | 판단 |
 |---|---|---|---|
-| OpenAI Remote Control relay 재사용 | 기존 NAT 접근 인프라 | 외부 A2A 클라이언트 공개 계약 미확인, 계정·인증 종속 | 채택 제외 |
-| Tailscale 등 사설망 + 호스트별 Bridge + 로컬 App Server | 공인 IP·포트 포워딩 없이 연결 가능하도록 구성 가능, 개발 범위 작음 | 사설망 가입·ACL 설정 필요, 환경별 검증 필요 | 첫 두 서버 MVP 추천 |
-| 자체 WSS relay + 호스트별 outbound Bridge | 양쪽 모두 outbound, agent ID 기반 라우팅, 사설망 제품 의존 감소 | relay 운영, 인증·저장·재전송·용량 제한 구현 필요 | 장기 확장 목표 |
+| OpenAI Remote Control relay 재사용 | 기존 NAT 접근 인프라 | 외부 A2A 클라이언트 공개 계약 미확인, 계정·인증 종속 | 우선 검증, client 계약 미확인 |
+| Tailscale 등 사설망 + 호스트별 Bridge + 로컬 App Server | 공인 IP·포트 포워딩 없이 연결 가능하도록 구성 가능, 개발 범위 작음 | 사설망 가입·ACL 설정 필요, 환경별 검증 필요 | 초기 대안, 현재 우선순위 아님 |
+| 자체 WSS relay + 호스트별 outbound Bridge | 양쪽 모두 outbound, agent ID 기반 라우팅, 사설망 제품 의존 감소 | relay 운영, 인증·저장·재전송·용량 제한 구현 필요 | 대안, 현재 우선순위 아님 |
 
-추천은 **호스트별 Bridge + 공식 로컬 App Server adapter**다. 처음에는 사설망을 사용하고,
-이후 자체 relay로 전송 계층을 교체한다. NAT 독립성을 PoC 단계의 성과로 주장하지 않는다.
-초기 subprocess 경계는 현재 코드에 있으며 네트워크 Transport 인터페이스는 다음 단계에서 정의한다.
+## 현재 우선순위: OpenAI 클라우드 경로 검증
+
+2026-10-30 사용자 결정: **양쪽 서버가 OpenAI 클라우드로 outbound 연결하고,
+상대 주소·포트 개방·Tailscale 설치 없이 pairing code만으로 연결**하는 경로를 우선 검증한다.
+위 표의 사설망 권장은 초기 대안 비교 기록이다. 현재 구현 방향은 Tailscale/SSH/자체 relay로
+대체하지 않으며, 해당 대안으로 목표를 달성했다고 판정하지 않는다.
+
+호스트 측 등록·코드 발급과 원격 제어 클라이언트 측 코드 수락·접속을 각각 검증한다.
+둘 다 호스트로 relay에 등록되는 것만으로 서로 통신할 수 있다고 가정하지 않는다.
+`cloud-inspect`와 `cloud-probe`는 이 경로를 위한 진단이다. 구체적인 결과와 남은
+클라이언트 경로는 [클라우드 검증 기록](cloud-research.ko.md)을 따른다.
+
+아래 그림은 전송 계층을 분리한 초기 설계이다. 공식 OpenAI relay를 사용하려면
+Bridge가 사용할 수 있는 클라이언트 계약이 확인되어야 하며, 현재 확인되지 않았다.
 
 ```mermaid
 flowchart LR

@@ -11,6 +11,14 @@ The deterministic tests do not call a model. `python3 -m codex_bridge demo` requ
 Codex login and uses real model turns. Keep transcripts in ignored `.runtime/`.
 Do not change another active conversation or publish account information in tests.
 
+## Cloud diagnostics
+
+`python3 -m codex_bridge cloud-inspect` reads schemas from the installed CLI without
+contacting the relay. `cloud-probe` contacts OpenAI using official experimental RPCs;
+it temporarily enables Remote Control on a separate App Server and creates a pairing
+artifact. It does not call a model. Run it only in an appropriate logged-in environment.
+Tests in CI simulate RPC results and do not contact the cloud.
+
 ## GitHub
 
 Public repository: https://github.com/Parktune/codex-bridge

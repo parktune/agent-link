@@ -1,6 +1,7 @@
 # Security
 
-This is a local feasibility PoC, not a network service. Do not expose its App Server
+This is a feasibility PoC with an opt-in outbound OpenAI Remote Control probe.
+It does not implement an authenticated bridge peer service. Do not expose its App Server
 connection to untrusted clients. It has no peer authentication, replay protection,
 remote request authorization, or file access policy yet.
 
@@ -14,3 +15,11 @@ No pairing codes, account tokens, Codex home files, raw stderr, or runtime trans
 should be committed. `.runtime/` is ignored. Report potential issues through a private
 GitHub security advisory once a repository is published; until then contact the project
 owner privately without sharing credentials.
+
+
+`cloud-probe` temporarily exposes a separate App Server through Codex Remote Control
+using official RPCs and existing Codex authentication. It does not print pairing
+codes, credentials, or raw upstream errors. It disables its temporary Remote Control
+state on exit and terminates its subprocess; enrollment records and unexpired pairing
+artifacts may remain in Codex/cloud storage. It does not revoke clients or remove
+credentials. A host-side probe passing is not proof of safe A2A authorization.
