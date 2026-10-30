@@ -13,7 +13,7 @@ from .daemon import cloud_status
 async def probe():
     """No model turn and no changes to existing conversations."""
     async with AppServer() as server:
-        with tempfile.TemporaryDirectory(prefix="codex-bridge-probe-") as cwd:
+        with tempfile.TemporaryDirectory(prefix="agent-link-probe-") as cwd:
             thread = await server.start_thread(cwd)
             result = await server.call("thread/read", {"threadId": thread, "includeTurns": False})
             assert result["thread"]["id"] == thread
@@ -30,7 +30,7 @@ async def demo():
                  "receiver": receiver, **data}
         print(json.dumps(value, ensure_ascii=False), flush=True)
 
-    with tempfile.TemporaryDirectory(prefix="codex-bridge-demo-") as root:
+    with tempfile.TemporaryDirectory(prefix="agent-link-demo-") as root:
         for name in ("A", "B"):
             Path(root, name).mkdir()
         async with AppServer() as a, AppServer() as b:
@@ -68,7 +68,7 @@ async def demo():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Codex Bridge: security (SSH) and comfort (reserved Tailscale) modes")
+    parser = argparse.ArgumentParser(description="Agent Link: security (SSH) and comfort (reserved Tailscale) modes")
     commands = parser.add_subparsers(dest="command", required=True)
     for command in ("probe", "demo", "cloud-inspect", "cloud-probe", "cloud-status"):
         child = commands.add_parser(command)
@@ -97,7 +97,7 @@ def main():
         else:
             asyncio.run(probe() if args.command == "probe" else demo())
     except (RuntimeError, TimeoutError, OSError, ValueError) as exc:
-        parser.exit(1, f"codex-bridge: {exc}\n")
+        parser.exit(1, f"agent-link: {exc}\n")
 
 
 if __name__ == "__main__":

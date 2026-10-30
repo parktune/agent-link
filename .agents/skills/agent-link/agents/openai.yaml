@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Link"
+  short_description: "Pair Codex sessions over approved SSH"
+  default_prompt: "이 Codex 세션에서 $agent-link을 실행해 다른 Ubuntu PC와 pairing합니다."

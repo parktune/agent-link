@@ -75,8 +75,12 @@ def windows_acl(path, *, directory=False):
 
 def default_root():
     if os.name == 'nt':
-        return Path(os.environ['LOCALAPPDATA']) / 'codex-bridge'
-    return Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state')) / 'codex-bridge'
+        parent = Path(os.environ['LOCALAPPDATA'])
+    else:
+        parent = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local/state'))
+    current, legacy = parent / 'agent-link', parent / 'codex-bridge'
+    # Preserve identities, tokens and pending messages from pre-rename installations.
+    return legacy if legacy.exists() and not current.exists() else current
 
 
 def digest(secret):

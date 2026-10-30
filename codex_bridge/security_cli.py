@@ -45,7 +45,7 @@ def configure(subparsers):
     commands.add_parser('revoke').add_argument('peer')
     commands.add_parser('prune')
     commands.add_parser('mcp')
-    commands.add_parser('mcp-install').add_argument('--name', default='codex_bridge_security')
+    commands.add_parser('mcp-install').add_argument('--name', default='agent_link_security')
 
 
 def run(args):

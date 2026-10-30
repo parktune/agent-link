@@ -7,7 +7,7 @@
 
 ## 목표와 합격 기준
 
-양쪽 서버에 Codex와 codex-bridge만 설치한다. 양쪽은 OpenAI 클라우드에 outbound로
+양쪽 서버에 Codex와 agent-link만 설치한다. 양쪽은 OpenAI 클라우드에 outbound로
 접속한다. 상대 IP/hostname 공유, inbound 포트 개방, Tailscale/SSH/자체 relay 없이
 짧은 pairing code만 입력해 연결한다. 각 서버의 기존 대화 컨텍스트를 유지하며
 A→B 요청/결과와 B→A 요청/결과를 실제 모델로 검증해야 최종 합격이다.
@@ -85,8 +85,8 @@ Tailscale/자체 relay로 자동 전환하지 않는다. 공식 경로가 확인
 ## 재현
 
 ```bash
-.venv/bin/codex-bridge cloud-inspect
-.venv/bin/codex-bridge cloud-probe --timeout 30
+.venv/bin/agent-link cloud-inspect
+.venv/bin/agent-link cloud-probe --timeout 30
 ```
 
 현재 버전은 기존 daemon 소유권을 먼저 검사하며, 같은 installation의 소유자가 있으면 exit 2로 생략한다.

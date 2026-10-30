@@ -85,9 +85,9 @@ Remote Control pairing은 다른 계약이다. exec-server는 이번에 실제 �
 
 ```bash
 .venv/bin/python -m pip install -e ".[diagnostics]"
-.venv/bin/codex-bridge cloud-status
-.venv/bin/codex-bridge cloud-inspect
-.venv/bin/codex-bridge cloud-probe
+.venv/bin/agent-link cloud-status
+.venv/bin/agent-link cloud-inspect
+.venv/bin/agent-link cloud-probe
 .venv/bin/python -m unittest discover -s tests -v
 ```
 

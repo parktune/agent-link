@@ -8,52 +8,62 @@
 상태만 예약하고 설치·로그인·실행·공용 네트워크 검색을 수행하지 않는다.
 Security라는 이름은 감사·인증·망분리 보장을 뜻하지 않는다. 일반 SSH의 신뢰 모델을 따른다.
 
-## 사전 조건
+## `$agent-link` pairing 흐름: 사용자 PC A ↔ 서버 PC B
 
-- 양쪽에 Python 3.11+와 codex-bridge 설치. MCP 도구에는 `pip install -e '.[security]'` 필요.
-- SSH initiator B에서 서버 A에 비대화형 공개키 인증이 가능해야 한다.
-- A의 host key는 관리자가 배포하거나 별도 신뢰 경로로 fingerprint를 확인해 known_hosts에 등록한다.
-  `ssh-keyscan` 결과만으로 호스트를 신뢰하지 않는다.
-- ssh config와 remote Python path는 신뢰된 로컬 사용자가 선택하며, MCP나 원격 메시지가 수정할 수 없다.
+양쪽 Codex에서 저장소의 `.agents/skills/agent-link` 스킬을 사용할 수 있어야 한다.
+사용자는 각자의 이미 열린 Codex 대화에서 `$agent-link`을 실행한다.
 
-`~/.ssh/config` 예시:
+1. PC A에서 코드 발행 역할을 선택한다. 스킬이 A의 identity를 준비하고 5분짜리 1회용 pairing code,
+   내부 hostname 후보, 원격 실행에 필요한 A의 Python 절대 경로를 표시한다.
+2. 사용자는 이 정보를 신뢰된 별도 경로로 B Codex 세션에 전달한다.
+3. B에서 코드 입력 역할을 선택한다. 스킬은 pairing code를 CLI의 비표시 입력으로 전달해 B에서 A로
+   SSH 연결을 등록한다. 코드는 shell 명령행·환경변수·파일에 기록하지 않는다.
+4. 각 스킬 실행은 현재 Codex 설치에 MCP 서버가 없는 경우에만 등록을 요청한다. 승인 정책은 바꾸지 않는다.
+
+사용자는 pairing 명령을 직접 입력할 필요가 없다. 스킬 내부에서는 기존 CLI의 `security init`,
+`pair-code`, `connect` 동작을 사용한다. 지원 범위는 Ubuntu ↔ Ubuntu다.
+
+### SSH 경로 조건
+
+- **B에서 A로** 비대화형 공개키 인증이 가능한 기존 OpenSSH 연결이어야 한다.
+- A의 SSH 서비스가 이미 실행 중이고 B에서 접근 가능해야 한다. pairing 스킬은 sshd를 설치·실행하거나
+  방화벽/라우터를 변경하지 않는다. 이 설정이 안 되어 있으면 회사 관리자 절차로 먼저 준비한다.
+- A의 host key는 회사에서 배포하거나 별도 신뢰 경로로 fingerprint를 확인한 뒤 B의 known_hosts에 등록한다.
+  `ssh-keyscan`만으로 호스트를 신뢰하지 않는다.
+- B에서 쓸 SSH alias/hostname과 A의 remote Python 절대 경로는 사용자가 확인한다.
+  hostname이 사내 DNS에서 해석되지 않으면 승인된 SSH config alias를 전달한다.
+- 사내망에 함께 있다는 사실만으로 SSH 접근성이나 데이터의 사내망 잔류가 보장되지는 않는다.
+  SSH config의 HostName, ProxyJump 등 실제 경로를 회사 정책에 따라 확인한다.
+
+B의 `~/.ssh/config` 예시:
 
 ```sshconfig
-Host server-a
+Host workstation-a
     HostName approved-private-hostname
     User dedicated-bridge-user
     IdentityFile ~/.ssh/company-approved-key
     IdentitiesOnly yes
 ```
 
-bridge는 alias만 받으며 사용자 이름·IP를 인수로 조합하지 않는다. 기존 회사 ProxyJump 등
-승인된 경로 설정은 해당 alias를 따른다. SSH config 자체가 공인 호스트나 외부 jump host를
-가리키면 데이터가 사내망에만 머문다고 보장하지 않으므로 관리자가 경로를 승인해야 한다.
+bridge는 호스트 키 자동 수락, agent forwarding, port forwarding, 임의 SSH 명령 실행을 허용하지 않는다.
+알 수 없는 host key, SSH 인증 실패, 원격 Python 경로 오류를 자동 우회하지 않는다.
 
-강제하는 옵션: `BatchMode=yes`, `StrictHostKeyChecking=yes`, `ForwardAgent=no`,
-`ClearAllForwardings=yes`, `PermitLocalCommand=no`, 별도 control socket 재사용 비활성화.
-오래된 known_hosts, 키 잠금 해제 필요, 원격 Python 설치 실패 등은 자동 우회하지 않는다.
+## Pairing 내부 동작
 
-## 등록
+A는 code hash와 5분 만료 시간을 저장하고, 최대 5회 입력 오류 뒤 초대를 닫는다. 성공 시 초대 코드를
+삭제하고 B의 256-bit peer token을 hash 형태로 보관한다. B는 token을 private local DB에 저장한다.
+Pairing code는 SSH 권한 또는 host key 검증을 대체하지 않는다.
 
-A의 로컬 승인: `security init --name agent-a`, `security pair-code`.
-B: `security init --name agent-b`, `security connect agent-a --ssh-host server-a --remote-python /absolute/venv/bin/python`.
-코드는 SSH stdin으로만 전송하며 argv·환경 변수·설정 파일에는 저장하지 않는다.
-서버에는 코드 hash, 5분 만료, 최대 5회 실패 횟수가 저장된다. 성공하면 삭제된다.
-등록 후 256-bit token을 B의 private DB에, hash를 A의 private DB에 저장한다.
-이 코드는 SSH 접속 권한이나 host key 검증을 대체하지 않는다.
-
-A에는 B를 inbound peer로 기록하고 B에는 A로 향하는 SSH route를 기록한다.
-하나의 route에서 B가 양쪽 mailbox를 교환하므로 A가 B로 SSH 접속할 필요가 없다.
-A의 peers에 표시되는 B alias는 B의 init name이며, 이름 충돌 시 UUID로 표시한다.
+A에는 B가 inbound peer로, B에는 A가 SSH route peer로 저장된다. 따라서 B가 양쪽 mailbox를 동기화하며
+A가 B로 접속할 필요는 없다. A의 peer 표시 이름은 B에서 생성한 agent 이름이다.
 
 ## 프로필과 상태 경로
 
 `security --profile corporate ...`로 프로필을 분리할 수 있다. 옵션은 하위 명령보다 먼저 둔다.
 다른 프로필에 접속하려면 connect에 `--remote-profile corporate`를 추가한다.
 신뢰된 로컬 상태 경로를 바꾸려면 `security --state-dir /trusted/parent ...`를 사용한다.
-기본 경로는 `$XDG_STATE_HOME/codex-bridge/<profile>` 또는
-`~/.local/state/codex-bridge/<profile>`이다. 디렉터리 0700/DB 0600으로 보호한다.
+기본 경로는 `$XDG_STATE_HOME/agent-link/<profile>` 또는
+`~/.local/state/agent-link/<profile>`이다. 디렉터리 0700/DB 0600으로 보호한다.
 암호화 저장소는 아니므로 LUKS 등 회사 정책을 따로 적용한다.
 Windows 관련 후보 구현은 현재 지원·운영 검증 범위가 아니며 connect CLI에서 Windows 대상을 제공하지 않는다.
 
@@ -70,11 +80,10 @@ Windows 관련 후보 구현은 현재 지원·운영 검증 범위가 아니며
 - inbox를 읽은 것만으로 실행되지 않는다. 원격 내용을 사용자 권한으로 승격하지 않는다.
 - background push/TUI 자동 메시지 주입이 없으므로 활성 Codex가 도구를 호출하지 않으면 처리는 대기한다.
 
-MCP 서버는 회사 사용자 로컬에서 stdio로 실행한다. 등록은 명시적 `mcp-install` 명령일 때만
-`codex mcp add`를 호출한다. 기존 등록은 덮어쓰지 않는다. 도구 승인은 기존 Codex 설정을 따른다.
+MCP 서버는 회사 사용자 로컬에서 stdio로 실행한다. 사용자가 `$agent-link`을 실행하면 스킬이 등록 상태를 확인하고, 없을 때만 `mcp-install`을 통해 `codex mcp add`를 호출한다. 기존 등록은 덮어쓰지 않는다. 도구 승인은 기존 Codex 설정을 따른다.
 `approval_policy=never`인 환경에서 승인이 필요한 MCP 도구는 거부될 수 있다. 이때 회사가
 허용한 interactive 승인 정책과 도구별 설정을 사용하며 등록기가 이를 자동 완화하지 않는다.
-[공식 MCP 승인 설정](https://learn.chatgpt.com/docs/extend/mcp)을 참고한다. 제거는 `codex mcp remove codex_bridge_security`.
+[공식 MCP 승인 설정](https://learn.chatgpt.com/docs/extend/mcp)을 참고한다. 제거는 `codex mcp remove agent_link_security`.
 
 ## SSH 권한과 endpoint 제한
 

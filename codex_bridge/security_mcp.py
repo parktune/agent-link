@@ -8,7 +8,7 @@ def create_server(bridge):
     except ImportError:
         raise RuntimeError('Install MCP support with: pip install -e ".[security]"') from None
 
-    server = FastMCP('codex-bridge-security')
+    server = FastMCP('agent-link-security')
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
     def bridge_peers() -> dict:

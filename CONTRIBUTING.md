@@ -28,13 +28,13 @@ Tests in CI simulate RPC results and do not contact the cloud.
 
 ## GitHub
 
-Public repository: https://github.com/Parktune/codex-bridge
+Public repository: https://github.com/Parktune/agent-link
 
 The default branch is `main`. Clone and contribute through a branch and pull request:
 
 ```bash
-git clone https://github.com/Parktune/codex-bridge.git
-cd codex-bridge
+git clone https://github.com/Parktune/agent-link.git
+cd agent-link
 git switch -c your-change
 ```
 

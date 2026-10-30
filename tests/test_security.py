@@ -8,7 +8,7 @@ import unittest
 import uuid
 
 from codex_bridge.security import Bridge, endpoint
-from codex_bridge.security_store import Store, windows_powershell_env
+from codex_bridge.security_store import Store, default_root, windows_powershell_env
 from codex_bridge.ssh_transport import SSHError, remote_command, run_json, ssh_argv
 
 
@@ -277,3 +277,20 @@ class WindowsAclTests(unittest.TestCase):
                 acl = json.loads(result.stdout)
                 self.assertTrue(acl['protected'])
                 self.assertEqual(set(acl['rules']), {acl['owner'], 'S-1-5-18'})
+
+
+class RenameCompatibilityTests(unittest.TestCase):
+    def test_existing_state_survives_product_rename(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as root:
+            parent = Path(root)
+            environment_key = 'LOCALAPPDATA' if os.name == 'nt' else 'XDG_STATE_HOME'
+            with patch.dict(os.environ, {environment_key: root}):
+                self.assertEqual(default_root(), parent / 'agent-link')
+                legacy = parent / 'codex-bridge'
+                legacy.mkdir()
+                legacy_store = Store(legacy)
+                original = legacy_store.initialize('existing-peer')
+                self.assertEqual(Store().identity(), original)
+                (parent / 'agent-link').mkdir()
+                self.assertEqual(default_root(), parent / 'agent-link')

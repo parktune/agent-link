@@ -1,4 +1,4 @@
-# Codex Bridge
+# Agent Link
 
 각자의 대화 컨텍스트를 유지하는 Codex 세션 사이에서 작업 요청·결과를 교환합니다.
 
@@ -13,112 +13,88 @@ Security라는 이름은 회사 보안 승인을 대신하지 않습니다. SSH 
 ## 설치
 
 **현재 지원 범위는 Ubuntu ↔ Ubuntu입니다.** Windows 지원은 추후 검토합니다.
-양쪽 PC에 Python 3.11+, 기존 OpenSSH 접속 환경, Codex가 필요합니다.
+양쪽 PC에 Python 3.11+, Codex, SSH가 필요합니다. 이번 pairing 흐름에서는 B가 A로 SSH 접속합니다.
 회사에서 승인한 패키지 설치 절차를 따르세요. 기본 전송 CLI는 표준 라이브러리만 사용하며
 MCP 통합을 위해 아래 extra를 설치합니다. Tailscale이나 별도 relay는 설치하지 않습니다.
 
 Ubuntu:
 
 ```bash
-git clone https://github.com/parktune/codex-bridge.git
-cd codex-bridge
+git clone https://github.com/parktune/agent-link.git
+cd agent-link
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[security]'
+python3 scripts/install_agent_link_skill.py
 ```
 
-아래 `codex-bridge`는 `.venv/bin/codex-bridge`를 뜻합니다.
-`codex-bridge modes`로 모드를 확인할 수 있습니다.
+이후 `agent-link` 명령은 `.venv/bin/agent-link`를 뜻합니다.
+`agent-link modes`로 모드를 확인할 수 있습니다.
 
-## SSH mode: Ubuntu A ↔ Ubuntu B
+## `$agent-link`로 연결: 사용자 PC A ↔ 서버 PC B
 
-예시는 **B에서 A로 SSH 접속 가능한 경우**입니다. A에는 별도 웹 서버나 추가 수신 포트를 열지 않습니다.
-서버가 다르면 먼저 회사에서 승인한 SSH config 별칭 `server-a`를 준비하고, 키 인증과
-호스트 키 fingerprint를 확인하세요. bridge는 최초 호스트 키를 자동 수락하지 않으며
-`BatchMode=yes`, `StrictHostKeyChecking=yes`, agent/port forwarding 비활성화를 강제합니다.
-사내 SSH 설정 예시는 [상세 가이드](docs/security-mode.ko.md)에 있습니다.
+양쪽 PC에서 저장소를 clone하고 위 설치 절차로 스킬을 등록합니다. Codex를 새로 열거나 skill 목록을 새로 고친 뒤, 사용자가 각 PC의 **이미 열려 있는 Codex 대화에서 `$agent-link` 스킬을 실행**합니다.
+A는 pairing code와 접속에 필요한 host 정보를 발행하고, B는 받은 정보를 입력해 A에 연결합니다.
+pairing code를 생성하기 위해 사용자가 직접 CLI 명령을 입력할 필요는 없습니다.
 
-A에서:
+### PC A: 코드 발행
 
-```bash
-codex-bridge security init --name agent-a
-codex-bridge security pair-code
-# 5분 유효, 1회용 코드를 B 사용자에게 안전하게 전달
-```
+A의 Codex에서:
 
-B에서:
+> `$agent-link` 이 PC를 A로 설정하고 pairing code를 발행해줘.
 
-```bash
-codex-bridge security init --name agent-b
-codex-bridge security connect agent-a \
-  --ssh-host server-a \
-  --remote-python /absolute/path/to/codex-bridge/.venv/bin/python
-# A의 코드를 비표시 입력
-codex-bridge security peers
-codex-bridge security sync --watch
-```
+스킬은 A의 identity를 준비하고 5분 유효·1회용 코드를 발행합니다. 함께 전달할 내부 hostname 후보와
+A에 설치된 agent-link Python 경로를 안내합니다. 해당 정보를 B의 Codex 세션에 안전하게 전달합니다.
 
-`--remote-python`은 **A에 설치한 venv Python의 절대 경로**입니다. 사용자 이름이나 홈 경로를
-하드코딩하지 않습니다. 현재 connect 명령은 Ubuntu/POSIX 서버만 대상으로 합니다.
+### PC B: 코드 입력 및 연결
 
-한 번 등록하면 **B→A 요청뿐 아니라 A→B 요청도 같은 SSH 경로로 전달**합니다.
-B의 sync가 A의 수신함에 배달하고 A의 발신함을 가져오는 방식이므로 A가 B로 SSH 접속할 필요는 없습니다.
-B에서 지속적으로 `sync --watch`를 실행하면 양방향 메시지가 주기적으로 교환됩니다.
-기존 SSH 설정·서비스·방화벽·Codex daemon은 자동 변경하지 않습니다.
+B의 Codex에서:
+
+> `$agent-link` A가 발행한 pairing code와 hostname을 입력할게. 연결해줘.
+
+스킬은 코드를 안전 입력 프롬프트로 받고 B에서 A로 SSH 연결을 등록합니다. 코드 값을 shell 명령,
+argv, 환경 변수, 파일에 넣지 않습니다. 연결 뒤 peer와 MCP 설정을 확인합니다.
+
+### 필요한 네트워크 조건
+
+현재 경로는 **B → A 방향의 기존 OpenSSH 접속**입니다. 두 PC가 사내망에 있더라도 A의 SSH 서비스가
+B에서 접근 가능해야 하며, A의 host key는 사전에 B의 `known_hosts`에서 신뢰되어야 합니다.
+코드 발행은 sshd 설치·실행, 방화벽 개방, SSH key 배포를 대신하지 않습니다. 스킬은 이런 시스템 설정을
+자동 변경하지 않습니다. hostname이 B에서 해석되지 않으면 회사에서 승인한 SSH alias를 전달하세요.
+
+중앙 relay, 웹 서버, Tailscale은 사용하지 않습니다. B가 A로 SSH 접속할 때 양쪽 SQLite mailbox를
+교환하므로 A에서 B로 역방향 SSH 연결을 열 필요는 없습니다. B가 `$agent-link` 완료 후 `security sync --watch`를 실행하면
+응답을 주기적으로 가져옵니다. 요청을 받은 Codex 대화는 자동으로 깨어나지 않으므로 수신 측에서
+`bridge_receive` 도구를 호출해야 합니다.
+
+자세한 스킬 절차는 [agent-link 스킬](.agents/skills/agent-link/SKILL.md),
+보안 설정과 저장 구조는 [Ubuntu 운영 가이드](docs/security-mode.ko.md)를 참고하세요.
 
 ## 기존 Codex 대화에서 사용
 
-각 PC에서 해당 프로필을 MCP 도구로 등록합니다.
-
-```bash
-codex-bridge security mcp-install
-```
-
-이 명령을 사용자가 실행하면 `codex mcp add`로 현재 venv의 stdio 도구를 등록합니다.
-기존 같은 이름의 설정은 덮어쓰지 않습니다. Codex에서 MCP 목록을 새로 고치거나 재시작한 뒤 사용하세요.
-
-B의 Codex:
-
-> bridge 도구로 agent-a에게 hello 작업을 요청하고 task ID를 알려줘.
+각 PC의 스킬이 MCP 도구를 필요할 때 등록합니다. 새 MCP 설정이 생기면 해당 Codex 세션의 도구 목록을
+새로 고치거나 Codex를 재시작해야 할 수 있습니다. 도구 승인은 기존 Codex 정책을 따릅니다.
 
 A의 Codex:
+
+> bridge 도구로 agent-b에게 hello 작업을 요청하고 task ID를 알려줘.
+
+B의 Codex:
 
 > bridge 수신함을 확인해. hello 요청에는 hello received로 응답해.
 
 도구는 `bridge_peers`, `bridge_send_task`, `bridge_receive`, `bridge_reply`,
-`bridge_task_status`, `bridge_ack`입니다. **현재 대화 안에서 도구를 호출하므로 thread를 새로
-만들거나 기존 세션을 다른 에이전트로 바꾸지 않습니다.**
+`bridge_task_status`, `bridge_ack`입니다. 현재 대화에서 호출되므로 각 Codex thread의 맥락은 유지됩니다.
+원격 내용은 비신뢰 도구 출력이며 로컬 사용자 권한을 대신하지 않습니다.
 
-요청 도착만으로 Codex를 자동 실행하거나 사용자 명령을 주입하지 않습니다.
-수신 측이 `bridge_receive`를 호출해야 하며, 원격 내용은 비신뢰 도구 출력으로 전달됩니다.
-`bridge_receive(wait_seconds=...)`는 최대 30초 대기를 요청할 수 있습니다. SSH 연결 자체의
-timeout은 별도로 적용됩니다. 대기·polling 주기는 회사 운영 정책에 맞추세요.
+## CLI 운영 및 상태 확인
 
-## CLI로 통신 확인
-
-B에서:
-
-```bash
-codex-bridge security send agent-a 'hello'
-```
-
-A에서:
-
-```bash
-codex-bridge security receive
-codex-bridge security reply <task-id> 'hello received'
-```
-
-B에서:
-
-```bash
-codex-bridge security task <task-id>
-```
+Pairing은 `$agent-link` 스킬로 진행합니다. 그 후 운영자는 상태 확인이나 mailbox 관리를 위해
+`agent-link security peers`, `sync`, `receive`, `task`, `revoke`, `prune` CLI 명령을 사용할 수 있습니다.
+작업 요청/응답은 기존 Codex 대화에서 MCP 도구로 수행하는 것을 기본 흐름으로 합니다.
 
 요청마다 task ID, 이벤트마다 message ID가 있으며 완료 상태와 배달 상태를 구분합니다.
-연결이 끊기면 동일한 저장된 message ID로 재시도합니다. `security ack <message-id>`는
-로컬 읽음 확인이며 실행 승인이 아닙니다. `security prune`은 배달·읽음 조건을 만족한
-본문을 제거하고 재전송 방지용 tombstone을 남깁니다. `security revoke <peer>`는
-로컬 자격을 폐기합니다. 양방향 폐기에는 상대 PC에서도 revoke가 필요합니다.
+`ack`는 로컬 읽음 확인이며 실행 승인이 아닙니다. `revoke`는 로컬 자격을 폐기하므로 양방향 폐기에는
+양쪽에서 처리해야 합니다.
 
 ## 범위와 검증
 
@@ -148,3 +124,10 @@ security mode 실행 시 호출하지 않습니다. [기술 조사](docs/feasibi
 OpenAI relay의 외부 pairing client 계약은 확인되지 않았고 현재 제품 경로가 아닙니다.
 
 Apache-2.0.
+
+## 이름 변경 호환성
+
+저장소·패키지·CLI·스킬의 기본 이름은 `agent-link`입니다. 기존 설치를 위해 `codex-bridge` CLI 별칭과
+`codex_bridge` Python 모듈은 유지합니다. 기존 `codex-bridge` 상태 디렉터리가 있으면 그 데이터를 계속
+사용하며, 새 설치는 `agent-link` 상태 디렉터리를 사용합니다. 기존 `codex_bridge_security` MCP 등록도
+계속 사용할 수 있고 새 등록의 기본 이름은 `agent_link_security`입니다.

@@ -25,7 +25,7 @@ from codex_bridge.rpc import AppServer
 
 async def exercise(root, port, models=False):
     a = Store(root / 'a')
-    b = Store(root / 'remote-state/codex-bridge', profile='remote')
+    b = Store(root / 'remote-state/agent-link', profile='remote')
     a.initialize('loopback-a')
     b.initialize('loopback-b')
     wrapper = root / 'remote-python'
@@ -121,7 +121,7 @@ def main():
     sshd = shutil.which('sshd') or '/usr/sbin/sshd'
     if os.name == 'nt' or not Path(sshd).exists() or not Path('/run/sshd').exists():
         raise SystemExit('This optional check needs Linux, OpenSSH server and existing /run/sshd. No installation is performed.')
-    with tempfile.TemporaryDirectory(prefix='.codex-bridge-ssh-', dir=Path.home()) as temp:
+    with tempfile.TemporaryDirectory(prefix='.agent-link-ssh-', dir=Path.home()) as temp:
         root = Path(temp)
         for key in ('host', 'client'):
             subprocess.run(['ssh-keygen', '-q', '-t', 'ed25519', '-N', '', '-f', str(root / key)], check=True)

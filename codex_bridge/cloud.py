@@ -18,7 +18,7 @@ HOST_METHODS = frozenset({
 
 async def inspect_cloud():
     """Inspect schemas from the installed binary, without contacting the relay."""
-    with tempfile.TemporaryDirectory(prefix="codex-bridge-schema-") as root:
+    with tempfile.TemporaryDirectory(prefix="agent-link-schema-") as root:
         process = await asyncio.create_subprocess_exec(
             "codex", "app-server", "generate-json-schema", "--experimental", "--out", root,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
