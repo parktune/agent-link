@@ -55,7 +55,24 @@ async def exercise(root, port, models=False):
     await ba.sync()
     await ba.reply(reverse['task_id'], 'reverse received')
     assert b.task(reverse['task_id'])['status'] == 'completed'
+    # Session-addressed conversation over the same SSH route; wakes recorded instead of calling codex.
+    woken = []
+
+    async def record(session, text):
+        woken.append((session, text))
+
+    ba.queue = bb.queue = record
+    a.add_session('loopback-a-session')
+    b.add_session('loopback-b-session')
+    sent = await ba.send_message('b', 'loopback-b-session', 'session hello', 'loopback-a-session')
+    await bb.wake()
+    await bb.send_message('loopback-a', 'loopback-a-session', 'session reply', 'loopback-b-session', sent['conversation_id'])
+    await ba.watch(once=True, emit=lambda line: None)
+    assert [session for session, _ in woken] == ['loopback-b-session', 'loopback-a-session']
+    assert 'session reply' in woken[1][1] and sent['conversation_id'] in woken[1][1]
+    assert a.peers()[0]['sessions'] == ['loopback-b-session']
     print(json.dumps({'transport': 'real OpenSSH loopback', 'bidirectional': True,
+                      'session_addressed_wakes': len(woken),
                       'host_key_verification': True, 'public_listener': False,
                       'system_ssh_modified': False, 'models_called': False}))
 
@@ -69,7 +86,7 @@ async def model_flow(a, b, root):
                 "mcp_servers.codex_bridge_security.args=" + json.dumps(arguments)]
         # Explicit authorization applies only to these synthetic test tools in this
         # temporary process. Never change the user's or product's approval defaults.
-        for tool in ('bridge_peers', 'bridge_send_task', 'bridge_receive', 'bridge_reply',
+        for tool in ('bridge_peers', 'bridge_send_message', 'bridge_send_task', 'bridge_receive', 'bridge_reply',
                      'bridge_task_status', 'bridge_ack'):
             command += ['-c', f'mcp_servers.codex_bridge_security.tools.{tool}.approval_mode="approve"']
         return command

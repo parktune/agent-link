@@ -32,7 +32,18 @@ support retries after lost responses without re-inserting messages. This is not 
 guarantee of exactly-once execution of a model's downstream actions.
 
 MCP returns remote text as untrusted tool output in the existing conversation.
-Incoming data is never injected as a trusted user turn or automatically executed.
+Session wake-up is opt-in per local session: only sessions registered with
+`security session add <name>` are woken, and only by `security watch` running
+as the same OS user. It queues a fenced envelope into that session with the
+official `codex queue` command, so the remote text does arrive as a user-turn
+message of that conversation. The envelope labels it untrusted remote data,
+but a label is not a permission boundary: a registered session should run with
+a sandbox/approval policy you accept for remote peers. Remove a session with
+`security session remove <name>` to stop wake-ups. The text is passed as a
+`codex queue` argument and is briefly visible to other local accounts through
+the process list; do not register sessions on hosts shared with untrusted users.
+There is no built-in limit on how many times two sessions answer each other;
+stop the watcher or remove the session to end a runaway exchange.
 The receiving Codex retains its own sandbox/approval policy. The shipping MCP
 registration does not preapprove tools or weaken that policy. Review the data
 scope before sending requests or results. SSH-only A2A does not prevent cloud

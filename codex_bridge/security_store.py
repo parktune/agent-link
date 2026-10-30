@@ -18,12 +18,36 @@ KINDS = frozenset({'task_request', 'task_accepted', 'task_progress', 'task_compl
 STATUSES = {'task_accepted': 'accepted', 'task_progress': 'running', 'task_completed': 'completed', 'task_failed': 'failed'}
 BATCH = 16
 WIRE_LIMIT = 262144
+BASE_FIELDS = frozenset({'id', 'task_id', 'type', 'text', 'sender', 'recipient'})
+SESSION_FIELDS = ('from_session', 'to_session')
+MAX_SESSIONS = 64
+# Kinds that wake the addressed Codex session; progress/accepted stay in the inbox.
+WAKE_KINDS = frozenset({'task_request', 'task_completed', 'task_failed', 'agent_message'})
+WAKE_MAX_ATTEMPTS = 20
 
 
 def name(value):
     if not isinstance(value, str) or not NAME.fullmatch(value):
         raise ValueError('Use 1–64 ASCII letters, digits, dot, underscore or hyphen; start with a letter/digit')
     return value
+
+
+def session_name(value):
+    # Codex `/rename` names: free text, but bounded and safe to pass as one argv element.
+    if (not isinstance(value, str) or not value.strip() or value != value.strip() or len(value) > 64
+            or value.startswith('-') or any(ord(c) < 32 or ord(c) == 127 for c in value)):
+        raise ValueError('Session name must be 1–64 printable characters without leading/trailing spaces or a leading hyphen')
+    return value
+
+
+def optional_session(value):
+    return None if value in (None, '') else session_name(value)
+
+
+def session_list(value):
+    if not isinstance(value, list) or len(value) > MAX_SESSIONS:
+        raise ValueError('Invalid session advertisement')
+    return sorted({session_name(v) for v in value})
 
 
 def identifier(value):
@@ -88,12 +112,21 @@ def digest(secret):
 
 
 def validate_message(message):
-    if not isinstance(message, dict) or set(message) != {'id', 'task_id', 'type', 'text', 'sender', 'recipient'}:
+    if not isinstance(message, dict) or not BASE_FIELDS <= set(message) <= BASE_FIELDS | set(SESSION_FIELDS):
         raise ValueError('Invalid message fields')
     for field in ('id', 'task_id', 'sender', 'recipient'):
         identifier(message[field])
     if message['type'] not in KINDS or not isinstance(message['text'], str) or len(message['text'].encode()) > 8192:
         raise ValueError('Unsupported message kind or text larger than 8192 bytes')
+    for field in SESSION_FIELDS:
+        if message.get(field) is not None:
+            session_name(message[field])
+
+
+def normalize_message(message):
+    # Pre-session peers omit session fields; compare and fingerprint one canonical form.
+    validate_message(message)
+    return {**message, **{field: message.get(field) for field in SESSION_FIELDS}}
 
 
 class Store:
@@ -117,7 +150,13 @@ class Store:
                 CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, peer TEXT NOT NULL, owned INTEGER NOT NULL,
                     status TEXT NOT NULL, text TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY, at REAL NOT NULL, action TEXT NOT NULL, reference TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS sessions(name TEXT PRIMARY KEY, added REAL NOT NULL);
             ''')
+            self._migrate(db, 'peers', {'remote_sessions': "TEXT NOT NULL DEFAULT '[]'"})
+            self._migrate(db, 'messages', {'from_session': 'TEXT', 'to_session': 'TEXT',
+                                           'wake': "TEXT NOT NULL DEFAULT 'none'", 'wake_attempts': 'INTEGER NOT NULL DEFAULT 0',
+                                           'wake_after': 'REAL NOT NULL DEFAULT 0', 'wake_error': 'TEXT'})
+            self._migrate(db, 'tasks', {'local_session': 'TEXT', 'remote_session': 'TEXT'})
         if os.name == 'nt':
             windows_acl(self.path)
         else:
@@ -132,6 +171,13 @@ class Store:
                 yield db
         finally:
             db.close()
+
+    @staticmethod
+    def _migrate(db, table, columns):
+        existing = {row[1] for row in db.execute(f'PRAGMA table_info({table})')}
+        for column, definition in columns.items():
+            if column not in existing:
+                db.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
 
     @staticmethod
     def _audit(db, action, reference):
@@ -195,7 +241,8 @@ class Store:
                 if db.execute('SELECT id FROM peers WHERE alias=? AND id<>?', (alias, agent_id)).fetchone():
                     alias = agent_id
                 token = secrets.token_urlsafe(32)
-                db.execute('INSERT OR REPLACE INTO peers VALUES (?,?,?,?,?,0)', (agent_id, alias, 'inbound', digest(token), None))
+                db.execute('INSERT OR REPLACE INTO peers(id,alias,direction,secret,route,revoked) VALUES (?,?,?,?,?,0)',
+                           (agent_id, alias, 'inbound', digest(token), None))
                 db.execute("DELETE FROM settings WHERE key='invitation'")
                 self._audit(db, 'peer_enrolled', agent_id)
         if error:
@@ -216,7 +263,7 @@ class Store:
             if any(not row['revoked'] for row in old):
                 raise RuntimeError('Peer exists; revoke before replacing a route')
             db.execute('DELETE FROM peers WHERE alias=? OR id=?', (alias, remote['agent_id']))
-            db.execute('INSERT INTO peers VALUES (?,?,?,?,?,0)',
+            db.execute('INSERT INTO peers(id,alias,direction,secret,route,revoked) VALUES (?,?,?,?,?,0)',
                        (remote['agent_id'], alias, 'ssh', token, json.dumps(route)))
             self._audit(db, 'ssh_route_added', remote['agent_id'])
 
@@ -225,7 +272,32 @@ class Store:
             rows = [dict(row) for row in db.execute('SELECT * FROM peers WHERE revoked=0 ORDER BY alias')]
         if internal:
             return rows
-        return [{k: row[k] for k in ('id', 'alias', 'direction')} for row in rows]
+        return [{'id': row['id'], 'alias': row['alias'], 'direction': row['direction'],
+                 'sessions': json.loads(row['remote_sessions'])} for row in rows]
+
+    def add_session(self, session):
+        session_name(session)
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if db.execute('SELECT COUNT(*) FROM sessions').fetchone()[0] >= MAX_SESSIONS:
+                raise RuntimeError('Too many registered sessions; remove one first')
+            db.execute('INSERT OR IGNORE INTO sessions VALUES (?,?)', (session, time.time()))
+            # Messages that arrived before registration become deliverable now.
+            db.execute("UPDATE messages SET wake='pending', wake_after=0 WHERE wake='unrouted' AND to_session=?", (session,))
+            self._audit(db, 'session_added', session)
+        return self.sessions()
+
+    def remove_session(self, session):
+        session_name(session)
+        with self.db() as db:
+            if not db.execute('DELETE FROM sessions WHERE name=?', (session,)).rowcount:
+                raise ValueError('Session is not registered')
+            self._audit(db, 'session_removed', session)
+        return self.sessions()
+
+    def sessions(self):
+        with self.db() as db:
+            return [row[0] for row in db.execute('SELECT name FROM sessions ORDER BY name')]
 
     def peer(self, alias):
         matches = [p for p in self.peers(internal=True) if alias in (p['id'], p['alias'])]
@@ -235,18 +307,22 @@ class Store:
 
     @staticmethod
     def wire(row):
-        return {'id': row['id'], 'sender': row['sender'], 'recipient': row['recipient'],
-                'task_id': row['task_id'], 'type': row['kind'], 'text': row['text']}
+        message = {'id': row['id'], 'sender': row['sender'], 'recipient': row['recipient'],
+                   'task_id': row['task_id'], 'type': row['kind'], 'text': row['text']}
+        # Omit unset session fields so session-less traffic stays readable by pre-session peers.
+        message.update({field: row[field] for field in SESSION_FIELDS if row[field] is not None})
+        return message
 
     def _insert(self, db, message, *, incoming, needs_ack=False):
-        validate_message(message)
+        message = normalize_message(message)
         old = db.execute('SELECT * FROM messages WHERE id=?', (message['id'],)).fetchone()
         if old:
-            if self.wire(old) != message:
+            if normalize_message(self.wire(old)) != message:
                 raise ValueError('Message ID collision')
             return
         receipt = db.execute('SELECT digest FROM receipts WHERE id=?', (message['id'],)).fetchone()
-        fingerprint = digest(json.dumps(message, sort_keys=True, ensure_ascii=False))
+        fingerprint = digest(json.dumps({k: v for k, v in message.items() if v is not None},
+                                        sort_keys=True, ensure_ascii=False))
         if receipt:
             if receipt[0] != fingerprint:
                 raise ValueError('Message ID collision')
@@ -256,10 +332,12 @@ class Store:
         kind = message['type']
         peer_id = message['sender'] if incoming else message['recipient']
         task = db.execute('SELECT * FROM tasks WHERE id=?', (message['task_id'],)).fetchone()
+        local, remote = (message['to_session'], message['from_session']) if incoming else (message['from_session'], message['to_session'])
         if kind == 'task_request':
             if task:
                 raise ValueError('Task ID already exists')
-            db.execute('INSERT INTO tasks VALUES (?,?,?,?,?)', (message['task_id'], peer_id, not incoming, 'requested', ''))
+            db.execute('INSERT INTO tasks(id,peer,owned,status,text,local_session,remote_session) VALUES (?,?,?,?,?,?,?)',
+                       (message['task_id'], peer_id, not incoming, 'requested', '', local, remote))
         elif kind in STATUSES:
             if not task or task['peer'] != peer_id or bool(task['owned']) != incoming:
                 raise ValueError('Task response has no matching request or peer')
@@ -269,21 +347,79 @@ class Store:
             if task['status'] == 'running' and next_status == 'accepted':
                 raise ValueError('Invalid task state regression')
             db.execute('UPDATE tasks SET status=?, text=? WHERE id=?', (next_status, message['text'], message['task_id']))
-        db.execute('INSERT INTO messages VALUES (?,?,?,?,?,?,?,?,?,?)',
+        wake = 'none'
+        if incoming and message['to_session'] and kind in WAKE_KINDS:
+            registered = db.execute('SELECT 1 FROM sessions WHERE name=?', (message['to_session'],)).fetchone()
+            wake = 'pending' if registered else 'unrouted'
+        db.execute('INSERT INTO messages(id,sender,recipient,task_id,kind,text,created,delivered,seen,needs_ack,'
+                   'from_session,to_session,wake) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
                    (message['id'], message['sender'], message['recipient'], message['task_id'], kind,
-                    message['text'], time.time(), incoming, False, needs_ack))
+                    message['text'], time.time(), incoming, False, needs_ack,
+                    message['from_session'], message['to_session'], wake))
         db.execute('INSERT INTO receipts VALUES (?,?,?,?)', (message['id'], fingerprint, message['sender'], message['recipient']))
         self._audit(db, 'message_received' if incoming else 'message_queued', message['id'])
 
-    def send(self, alias, text, kind='task_request', task_id=None):
+    def send(self, alias, text, kind='task_request', task_id=None, from_session=None, to_session=None):
         peer = self.peer(alias)
         own = self.identity()
+        from_session, to_session = optional_session(from_session), optional_session(to_session)
+        if from_session and from_session not in self.sessions():
+            raise ValueError(f'Register local session {from_session!r} first so replies can reach it')
         message = {'id': str(uuid.uuid4()), 'task_id': task_id or str(uuid.uuid4()),
-                   'sender': own['agent_id'], 'recipient': peer['id'], 'type': kind, 'text': text}
+                   'sender': own['agent_id'], 'recipient': peer['id'], 'type': kind, 'text': text,
+                   'from_session': from_session, 'to_session': to_session}
         with self.db() as db:
             db.execute('BEGIN IMMEDIATE')
             self._insert(db, message, incoming=False)
         return message
+
+    def claim_wakes(self, now=None):
+        """Atomically claim deliverable messages so concurrent watchers never double-queue."""
+        own = self.identity()['agent_id']
+        now = time.time() if now is None else now
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows = db.execute("SELECT * FROM messages WHERE recipient=? AND wake='pending' AND wake_after<=? "
+                              'ORDER BY rowid LIMIT ?', (own, now, BATCH)).fetchall()
+            claimed = []
+            for row in rows:
+                if not db.execute('SELECT 1 FROM sessions WHERE name=?', (row['to_session'],)).fetchone():
+                    db.execute("UPDATE messages SET wake='unrouted' WHERE id=?", (row['id'],))
+                    continue
+                db.execute("UPDATE messages SET wake='claimed' WHERE id=?", (row['id'],))
+                peer = db.execute('SELECT alias FROM peers WHERE id=?', (row['sender'],)).fetchone()
+                claimed.append({**self.wire(row), 'peer': peer['alias'] if peer else row['sender']})
+        return claimed
+
+    def finish_wake(self, message_id, error=None, now=None):
+        now = time.time() if now is None else now
+        with self.db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute("SELECT wake_attempts FROM messages WHERE id=? AND wake='claimed'", (message_id,)).fetchone()
+            if not row:
+                return
+            if error is None:
+                # Delivered into the session; it no longer belongs in the manual inbox.
+                db.execute("UPDATE messages SET wake='done', wake_error=NULL, seen=1 WHERE id=?", (message_id,))
+                self._audit(db, 'session_woken', message_id)
+                return
+            attempts = row[0] + 1
+            state = 'failed' if attempts >= WAKE_MAX_ATTEMPTS else 'pending'
+            db.execute('UPDATE messages SET wake=?, wake_attempts=?, wake_after=?, wake_error=? WHERE id=?',
+                       (state, attempts, now + min(300, 5 * 2 ** min(attempts, 6)), error[-500:], message_id))
+            self._audit(db, 'session_wake_failed', message_id)
+
+    def release_claims(self):
+        # A watcher that died mid-delivery leaves claims behind; retry them (at-least-once).
+        with self.db() as db:
+            return db.execute("UPDATE messages SET wake='pending' WHERE wake='claimed'").rowcount
+
+    def wake_status(self):
+        own = self.identity()['agent_id']
+        with self.db() as db:
+            rows = db.execute("SELECT id, to_session, wake, wake_attempts, wake_error FROM messages "
+                              "WHERE recipient=? AND wake NOT IN ('none','done') ORDER BY rowid LIMIT 50", (own,))
+            return [dict(row) for row in rows]
 
     def inbox(self):
         own = self.identity()['agent_id']
@@ -319,6 +455,10 @@ class Store:
             self._audit(db, 'messages_pruned', str(count))
         return {'deleted_messages': count, 'replay_tombstones_retained': True}
 
+    def advertise(self, db, peer_id, sessions):
+        if sessions is not None:
+            db.execute('UPDATE peers SET remote_sessions=? WHERE id=?', (json.dumps(session_list(sessions)), peer_id))
+
     def pending(self, peer_id):
         own = self.identity()['agent_id']
         with self.db() as db:
@@ -326,7 +466,7 @@ class Store:
             acks = [row[0] for row in db.execute('SELECT id FROM messages WHERE sender=? AND recipient=? AND needs_ack=1 ORDER BY rowid LIMIT ?', (peer_id, own, BATCH))]
         return messages, acks
 
-    def exchange(self, caller, token, messages, acks):
+    def exchange(self, caller, token, messages, acks, sessions=None):
         own = self.identity()['agent_id']
         identifier(caller)
         if not isinstance(token, str) or len(token) > 128:
@@ -342,6 +482,7 @@ class Store:
                 if message['sender'] != caller or message['recipient'] != own:
                     raise PermissionError('Message identity mismatch')
                 self._insert(db, message, incoming=True)
+            self.advertise(db, caller, sessions)
             for mid in acks:
                 identifier(mid)
                 row = db.execute('SELECT sender,recipient FROM messages WHERE id=?', (mid,)).fetchone()
@@ -354,7 +495,9 @@ class Store:
                     if not receipt or receipt['sender'] != own or receipt['recipient'] != caller:
                         raise ValueError('Unknown acknowledgment or route mismatch')
             outgoing = [self.wire(row) for row in db.execute('SELECT * FROM messages WHERE sender=? AND recipient=? AND delivered=0 ORDER BY rowid LIMIT ?', (own, caller, BATCH))]
-        return {'agent_id': own, 'accepted': [m['id'] for m in messages], 'acked': acks, 'messages': outgoing}
+            local_sessions = [row[0] for row in db.execute('SELECT name FROM sessions ORDER BY name')]
+        return {'agent_id': own, 'accepted': [m['id'] for m in messages], 'acked': acks, 'messages': outgoing,
+                'sessions': local_sessions}
 
     @staticmethod
     def _batch(messages, acks):
@@ -364,7 +507,8 @@ class Store:
     def apply_exchange(self, peer_id, sent, acks, response):
         own = self.identity()['agent_id']
         expected = {'agent_id', 'accepted', 'acked', 'messages'}
-        if not isinstance(response, dict) or set(response) != expected or response['agent_id'] != peer_id:
+        if (not isinstance(response, dict) or not expected <= set(response) <= expected | {'sessions'}
+                or response['agent_id'] != peer_id):
             raise ValueError('Unexpected peer identity or response fields')
         if response['accepted'] != [m['id'] for m in sent] or response['acked'] != acks:
             raise ValueError('Unexpected exchange receipt')
@@ -378,6 +522,7 @@ class Store:
                 if message['sender'] != peer_id or message['recipient'] != own:
                     raise PermissionError('Message identity mismatch')
                 self._insert(db, message, incoming=True, needs_ack=True)
+            self.advertise(db, peer_id, response.get('sessions'))
             db.executemany('UPDATE messages SET delivered=1 WHERE id=? AND sender=? AND recipient=?',
                            [(m['id'], own, peer_id) for m in sent])
             db.executemany('UPDATE messages SET needs_ack=0 WHERE id=? AND sender=? AND recipient=?',

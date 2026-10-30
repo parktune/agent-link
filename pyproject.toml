@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-link"
-version = "0.2.0"
+version = "0.3.0"
 description = "Feasibility-first bridge for independent Codex conversations"
 requires-python = ">=3.11"
 license = "Apache-2.0"

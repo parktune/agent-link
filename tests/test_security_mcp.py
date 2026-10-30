@@ -25,7 +25,7 @@ class McpTests(unittest.IsolatedAsyncioTestCase):
                     await session.initialize()
                     tools = await session.list_tools()
                     names = {tool.name for tool in tools.tools}
-                    self.assertEqual(names, {'bridge_peers', 'bridge_send_task', 'bridge_receive',
+                    self.assertEqual(names, {'bridge_peers', 'bridge_send_message', 'bridge_send_task', 'bridge_receive',
                                              'bridge_reply', 'bridge_task_status', 'bridge_ack'})
                     peers = await session.call_tool('bridge_peers', {})
                     self.assertFalse(peers.isError)

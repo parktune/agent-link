@@ -12,16 +12,32 @@ def create_server(bridge):
 
     @server.tool(annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False))
     def bridge_peers() -> dict:
-        """List locally approved SSH peers. Does not discover or contact other machines."""
-        return {'mode': 'security', 'peers': bridge.store.peers()}
+        """List approved peers with the Codex session names they accept, plus this machine's sessions.
+
+        Does not discover or contact other machines; remote session lists come from the last sync.
+        """
+        return {'mode': 'security', 'peers': bridge.store.peers(), 'local_sessions': bridge.store.sessions()}
 
     @server.tool()
-    async def bridge_send_task(peer: str, text: str) -> dict:
-        """Send a user-authorized task to an approved peer. Delivery is not execution or completion.
+    async def bridge_send_message(peer: str, to_session: str, text: str, from_session: str = '',
+                                  conversation_id: str = '') -> dict:
+        """Send a conversation message to a named Codex session on an approved peer.
 
+        The remote watcher queues it into that session, which wakes up and can answer the same way.
+        from_session is this conversation's own registered session name, so answers come back here.
+        Reuse conversation_id from an incoming message to continue that conversation.
         Do not send secrets or data outside the user's approved scope. Does not execute commands.
         """
-        return await bridge.send(peer, text)
+        return await bridge.send_message(peer, to_session, text, from_session, conversation_id)
+
+    @server.tool()
+    async def bridge_send_task(peer: str, text: str, to_session: str = '', from_session: str = '') -> dict:
+        """Send a user-authorized task to an approved peer. Delivery is not execution or completion.
+
+        With to_session the named remote session is woken; with from_session the result wakes this one.
+        Do not send secrets or data outside the user's approved scope. Does not execute commands.
+        """
+        return await bridge.send(peer, text, to_session, from_session)
 
     @server.tool()
     async def bridge_receive(wait_seconds: float = 0) -> dict:

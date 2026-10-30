@@ -72,13 +72,40 @@ Windows 관련 후보 구현은 현재 지원·운영 검증 범위가 아니며
 로컬 outbox 저장 → SSH exchange → 상대 inbox 저장 → 상대 Codex의 MCP receive →
 로컬 권한에 따른 작업 → MCP reply → 다음 exchange에서 결과 회수.
 
-- `security sync --watch`는 현재 profile의 outbound SSH route를 5초마다 순차 교환한다.
-- 도구의 send/receive/task-status/reply도 필요한 sync를 수행한다.
+- `security watch`(= `sync --watch`)는 5초마다 outbound SSH route를 순차 교환하고, 등록된 세션 앞으로 온 메시지를 깨운다.
+- 도구의 send/receive/task-status/reply도 필요한 sync를 수행한다. 깨우기는 watch만 수행한다.
 - A의 inbound peer는 `awaiting_remote_poll`이다. queued는 전달·모델 실행·완료를 뜻하지 않는다.
 - 응답 소실 시 같은 message UUID로 재시도하며 DB transaction/deduplication으로 중복 저장·상태 변경을 막는다.
 - task의 requester/peer와 상태를 검증하며 terminal task의 progress 회귀를 거부한다.
 - inbox를 읽은 것만으로 실행되지 않는다. 원격 내용을 사용자 권한으로 승격하지 않는다.
-- background push/TUI 자동 메시지 주입이 없으므로 활성 Codex가 도구를 호출하지 않으면 처리는 대기한다.
+- 세션 이름이 없거나 등록되지 않은 세션 앞 메시지는 깨우지 않고 수신함에 남는다. 이때는 `bridge_receive`로 처리한다.
+
+## 세션 주소와 자동 깨우기
+
+한 서버에서 여러 Codex 대화가 agent-link를 쓸 수 있다. 대화는 Codex `/rename`으로 붙인 **세션 이름**으로 구분한다.
+메시지는 `peer` + `to_session`으로 보내고, 보낸 쪽 `from_session`이 함께 전달되어 답장이 원래 대화로 돌아온다.
+
+1. 각 대화에서 `/rename <이름>`으로 세션 이름을 정한다.
+2. `$agent-link`가 `security session add <이름>`으로 그 이름을 수신 허용 목록에 등록한다.
+   등록된 이름 목록은 다음 sync 때 상대에게 알려지고 `bridge_peers`의 `sessions`에 보인다.
+3. 양쪽 PC에서 `security watch`를 실행해 둔다. B는 SSH 교환과 깨우기를, A는 깨우기를 담당한다.
+4. watch는 새 메시지를 `codex queue --thread=<이름> --message=<봉투> --resume`으로 그 대화에 넣는다.
+   대화가 작업 중이면 Codex 큐에서 차례를 기다린다.
+5. 깨어난 대화는 봉투에 적힌 대로 `bridge_send_message`(대화) 또는 `bridge_reply`(작업 결과)로 답한다.
+
+| 종류 | 도구 | 상태 관리 | 깨우기 |
+|---|---|---|---|
+| 대화 메시지 `agent_message` | `bridge_send_message(peer, to_session, text, from_session, conversation_id)` | 없음. `conversation_id`로 묶음 | 받는 쪽 세션 |
+| 작업 `task_request` | `bridge_send_task(peer, text, to_session, from_session)` | requested → completed/failed | 받는 쪽 세션 |
+| 작업 결과 `task_completed/failed` | `bridge_reply(task_id, text)` | terminal | 요청한 세션 (자동 라우팅) |
+
+- `codex queue`는 **활성 세션**에만 넣을 수 있다(`No active session found`). 실패하면 5초부터 최대 5분 간격으로 재시도하고,
+  20회 실패하면 `failed`로 두고 수신함에 남긴다. `security session status`로 확인한다.
+- 등록 전에 도착한 메시지는 `unrouted`로 보관되었다가 `session add` 시점에 다시 깨우기 대상이 된다.
+- watch가 깨우기 도중 종료되면 다음 시작 때 재시도한다. 같은 메시지가 두 번 들어갈 수 있다(at-least-once).
+- watch는 세션을 소유한 OS 사용자와 같은 `CODEX_HOME`으로 실행해야 한다. 다른 경로의 Codex를 쓰면 `--codex <경로>`를 지정한다.
+- 두 대화가 서로 답하는 횟수에는 제한이 없다. 멈추려면 watch를 끄거나 `security session remove <이름>`을 실행한다.
+- 봉투는 원격 내용을 비신뢰 데이터로 표시하지만, 대화에는 user 메시지로 들어간다. 등록한 세션의 sandbox/승인 정책을 원격 peer 기준으로 정한다.
 
 MCP 서버는 회사 사용자 로컬에서 stdio로 실행한다. 사용자가 `$agent-link`을 실행하면 스킬이 등록 상태를 확인하고, 없을 때만 `mcp-install`을 통해 `codex mcp add`를 호출한다. 기존 등록은 덮어쓰지 않는다. 도구 승인은 기존 Codex 설정을 따른다.
 `approval_policy=never`인 환경에서 승인이 필요한 MCP 도구는 거부될 수 있다. 이때 회사가
@@ -118,7 +145,7 @@ SSH 키와 기존 SSH session은 별도로 관리한다. 인증 실패가 자동
 ## 실제 두 서버 검증
 
 현재 자동 테스트와 실제 OpenSSH **loopback** 검증은 서로 다른 물리 서버 검증을 대체하지 않는다.
-실제 A/B에서는 위 절차대로 등록한 후 양방향 hello task/result, 재연결, revoke 거부를 확인한다.
+실제 A/B 절차는 [실서버 시험 절차](real-server-test.ko.md)를 따른다.
 Windows 지원은 이번 작업 범위에서 제외했다. CI는 Ubuntu의 Python 3.11/3.13을 검증한다.
 
 ## 주소 후보 발급

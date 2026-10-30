@@ -100,3 +100,18 @@ Windows 전용 regression은 사전에 명시적 Everyone ACE가 있던 디렉�
 사용자 후속 지시에 따라 Windows 지원·CI 검토는 보류한다. 최종 대상은 Ubuntu ↔ Ubuntu이며
 Ubuntu Python 3.11/3.13 CI를 기준으로 한다. 이전 Windows CI 실패·호환성 수정 기록이
 Windows 지원 완료를 뜻하지 않는다. CLI는 POSIX remote platform만 제공한다.
+
+
+## 세션 주소·자동 깨우기, 2026-10-30
+
+- 세션 이름 라우팅·깨우기 단위 테스트 추가, 전체 56개 중 55개 통과(Windows ACL 1개 skip).
+  양방향 대화 깨우기, 작업 결과의 요청 세션 복귀, 한 호스트의 여러 세션, 미등록 세션 보류 후 등록 시 전달,
+  비활성 세션 재시도·backoff, 보낸 세션 미등록 거부, 세션 없는 메시지의 기존 wire 형식 유지,
+  `codex queue` argv(`--thread=`/`--message=` 형식, 옵션처럼 보이는 본문)와 실패 메시지를 검증했다.
+- 이전 버전 상태 DB를 새 코드로 열어 컬럼 migration과 대기 중 메시지 유지를 확인했다.
+- 실제 OpenSSH loopback 시험(`scripts/verify_security_ssh.py`, 모델 호출 없음)에 세션 주소 대화 왕복을 추가했고 통과했다.
+  이 시험에서 깨우기는 `codex queue` 대신 기록용 함수로 대체했다.
+- **미검증:** 실제 열린 Codex TUI 대화에 `codex queue`로 turn이 시작되는지, 서로 다른 물리 서버 두 대.
+  [실서버 시험 절차](real-server-test.ko.md)로 확인한다.
+- 호환성: 세션 필드를 쓰지 않는 메시지는 이전 형식 그대로지만, 새 exchange 응답의 `sessions` 필드는
+  이전 버전 B가 거부한다. 양쪽을 함께 업데이트한다.

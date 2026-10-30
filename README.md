@@ -1,6 +1,7 @@
 # Agent Link
 
-각자의 대화 컨텍스트를 유지하는 Codex 세션 사이에서 작업 요청·결과를 교환합니다.
+서로 다른 서버의 Codex 세션이 pairing 후 **세션 이름으로 메시지를 주고받습니다.**
+메시지를 받은 대화는 자동으로 깨어나 답하고, 각 대화는 자기 컨텍스트를 유지합니다.
 
 | 모드 | 전송 | 현재 상태 |
 |---|---|---|
@@ -62,34 +63,45 @@ B에서 접근 가능해야 하며, A의 host key는 사전에 B의 `known_hosts
 자동 변경하지 않습니다. hostname이 B에서 해석되지 않으면 회사에서 승인한 SSH alias를 전달하세요.
 
 중앙 relay, 웹 서버, Tailscale은 사용하지 않습니다. B가 A로 SSH 접속할 때 양쪽 SQLite mailbox를
-교환하므로 A에서 B로 역방향 SSH 연결을 열 필요는 없습니다. B가 `$agent-link` 완료 후 `security sync --watch`를 실행하면
-응답을 주기적으로 가져옵니다. 요청을 받은 Codex 대화는 자동으로 깨어나지 않으므로 수신 측에서
-`bridge_receive` 도구를 호출해야 합니다.
+교환하므로 A에서 B로 역방향 SSH 연결을 열 필요는 없습니다.
 
 자세한 스킬 절차는 [agent-link 스킬](.agents/skills/agent-link/SKILL.md),
 보안 설정과 저장 구조는 [Ubuntu 운영 가이드](docs/security-mode.ko.md)를 참고하세요.
 
-## 기존 Codex 대화에서 사용
+## 세션끼리 대화하기
 
-각 PC의 스킬이 MCP 도구를 필요할 때 등록합니다. 새 MCP 설정이 생기면 해당 Codex 세션의 도구 목록을
-새로 고치거나 Codex를 재시작해야 할 수 있습니다. 도구 승인은 기존 Codex 정책을 따릅니다.
+한 서버에 여러 Codex 대화가 있을 수 있으므로 대화는 **세션 이름**(Codex `/rename`)으로 부릅니다.
 
-A의 Codex:
+1. 각 대화에서 `/rename <이름>`으로 이름을 정하고, `$agent-link 이 대화를 수신 세션으로 등록해줘`라고 요청합니다.
+   스킬이 `security session add <이름>`을 실행합니다. 등록된 이름은 상대에게 자동으로 알려집니다.
+2. 양쪽 PC에서 `agent-link security watch`를 터미널(tmux 등)에 띄워 둡니다.
+   새 메시지가 오면 `codex queue`로 해당 이름의 대화에 넣어 그 대화를 깨웁니다.
+3. 대화에서 보냅니다.
 
-> bridge 도구로 agent-b에게 hello 작업을 요청하고 task ID를 알려줘.
+B의 `reviewer` 대화:
 
-B의 Codex:
+> agent-link로 agent-a의 planner 세션에 "설계 검토 부탁해"라고 보내. 내 세션은 reviewer야.
 
-> bridge 수신함을 확인해. hello 요청에는 hello received로 응답해.
+A의 `planner` 대화가 저절로 깨어나 메시지를 받고, 같은 `conversation_id`로 `reviewer`에 답합니다.
+작업 단위로 주고받으려면 `bridge_send_task`를 쓰며, `bridge_reply` 결과는 요청한 세션으로 자동으로 돌아갑니다.
 
-도구는 `bridge_peers`, `bridge_send_task`, `bridge_receive`, `bridge_reply`,
-`bridge_task_status`, `bridge_ack`입니다. 현재 대화에서 호출되므로 각 Codex thread의 맥락은 유지됩니다.
-원격 내용은 비신뢰 도구 출력이며 로컬 사용자 권한을 대신하지 않습니다.
+| 도구 | 용도 |
+|---|---|
+| `bridge_peers` | peer 목록과 각 peer가 받는 세션 이름, 이 PC의 등록 세션 |
+| `bridge_send_message` | 세션 이름으로 대화 메시지 전송 (`conversation_id`로 이어가기) |
+| `bridge_send_task` / `bridge_reply` / `bridge_task_status` | 작업 요청·결과·상태 |
+| `bridge_receive` / `bridge_ack` | 깨우지 않은 메시지(세션 미지정·미등록)를 직접 확인 |
+
+깨어난 대화는 그 세션의 user 메시지로 원격 내용을 받습니다. 봉투에 비신뢰 데이터라고 표시하지만 권한 경계는 아니므로,
+등록하는 세션의 sandbox/승인 정책을 원격 peer 기준으로 정하세요. 두 대화가 서로 답하는 횟수에 제한은 없습니다.
+멈추려면 watch를 끄거나 `security session remove <이름>`을 실행합니다. 자세한 동작은
+[운영 가이드](docs/security-mode.ko.md#세션-주소와-자동-깨우기)에 있습니다.
 
 ## CLI 운영 및 상태 확인
 
 Pairing은 `$agent-link` 스킬로 진행합니다. 그 후 운영자는 상태 확인이나 mailbox 관리를 위해
-`agent-link security peers`, `sync`, `receive`, `task`, `revoke`, `prune` CLI 명령을 사용할 수 있습니다.
+`agent-link security peers`, `watch`, `session add|remove|list|status`, `message`, `sync`, `receive`, `task`,
+`revoke`, `prune` CLI 명령을 사용할 수 있습니다.
 작업 요청/응답은 기존 Codex 대화에서 MCP 도구로 수행하는 것을 기본 흐름으로 합니다.
 
 요청마다 task ID, 이벤트마다 message ID가 있으며 완료 상태와 배달 상태를 구분합니다.
@@ -101,8 +113,11 @@ Pairing은 `$agent-link` 스킬로 진행합니다. 그 후 운영자는 상태 
 - 프로필별 SQLite 수신함, 만료·1회용 등록 코드, peer 토큰, ID 중복 방지, task 소유권·완료 상태 검증
 - SSH stdin/stdout만 사용. 임의 명령·파일 읽기·Codex turn 실행을 제공하는 원격 endpoint 없음
 - 기본 메시지 한도 8 KiB, 교환당 16개, live mailbox 10,000개, 제한된 subprocess 출력·실행 시간
-- 파일 전송, 자동 background Codex 실행, Tailscale mode는 아직 미구현
-- 실제 OpenSSH loopback의 양방향 작업 왕복과 MCP stdio handshake 검증. 별도 회사 서버 두 대 실측은 아직 미실시
+- 등록된 세션 이름으로만 `codex queue` 깨우기. 비활성 세션은 backoff 재시도, 미등록 세션 앞 메시지는 보류
+- 파일 전송, Tailscale mode는 아직 미구현
+- 실제 OpenSSH loopback의 세션 주소 양방향 왕복과 MCP stdio handshake 검증.
+  열린 TUI에 대한 실제 `codex queue` 깨우기와 별도 서버 두 대 실측은 [실서버 시험 절차](docs/real-server-test.ko.md)로 진행
+- 양쪽 agent-link는 같은 버전(0.3.0 이상)을 사용합니다. 이전 버전과는 exchange가 거부됩니다
 
 ```bash
 python -m unittest discover -s tests -v

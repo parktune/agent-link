@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from .security import Bridge, endpoint_stdio
+from .security import Bridge, CodexQueue, endpoint_stdio
 from .security_store import Store
 
 
@@ -31,11 +31,30 @@ def configure(subparsers):
     commands.add_parser('endpoint', help='Internal single-request SSH mailbox endpoint')
     sync = commands.add_parser('sync')
     sync.add_argument('--peer')
-    sync.add_argument('--watch', action='store_true')
+    sync.add_argument('--watch', action='store_true', help='Same as the watch command')
     sync.add_argument('--interval', type=float, default=5)
+    sync.add_argument('--codex', default='codex', help='Codex executable used to wake sessions')
+    watch = commands.add_parser('watch', help='Sync peers and wake registered Codex sessions with codex queue')
+    watch.add_argument('--interval', type=float, default=5)
+    watch.add_argument('--once', action='store_true')
+    watch.add_argument('--codex', default='codex', help='Codex executable used to wake sessions')
+    session = commands.add_parser('session', help='Local Codex sessions (by /rename name) that accept messages')
+    session_commands = session.add_subparsers(dest='session_command', required=True)
+    session_commands.add_parser('add').add_argument('session')
+    session_commands.add_parser('remove').add_argument('session')
+    session_commands.add_parser('list')
+    session_commands.add_parser('status', help='Messages waiting to wake a session')
     send = commands.add_parser('send')
     send.add_argument('peer')
     send.add_argument('text')
+    send.add_argument('--to-session')
+    send.add_argument('--from-session')
+    message = commands.add_parser('message', help='Send a conversation message to a named remote session')
+    message.add_argument('peer')
+    message.add_argument('text')
+    message.add_argument('--to-session', required=True)
+    message.add_argument('--from-session')
+    message.add_argument('--conversation-id')
     receive = commands.add_parser('receive')
     receive.add_argument('--wait', type=float, default=0)
     reply = commands.add_parser('reply')
@@ -52,7 +71,7 @@ def configure(subparsers):
 
 def run(args):
     store = Store(args.state_dir, args.profile)
-    bridge = Bridge(store)
+    bridge = Bridge(store, queue=CodexQueue(getattr(args, 'codex', 'codex')))
     command = args.security_command
     if command == 'endpoint':
         endpoint_stdio(store)
@@ -71,22 +90,33 @@ def run(args):
         result = asyncio.run(bridge.connect(args.alias, route, getpass.getpass('Remote pairing code: ')))
     elif command == 'peers':
         result = store.peers()
-    elif command == 'sync':
+    elif command in ('sync', 'watch'):
         if not 1 <= args.interval <= 300:
             raise ValueError('Sync interval must be between 1 and 300 seconds')
-        async def synchronize():
-            while True:
-                value = await bridge.sync(args.peer)
-                print(json.dumps(value), flush=True)
-                if not args.watch:
-                    return 1 if any(v['status'] == 'failed' for v in value) else 0
-                await asyncio.sleep(args.interval)
+        if command == 'sync' and not args.watch:
+            value = asyncio.run(bridge.sync(args.peer))
+            print(json.dumps(value), flush=True)
+            return 1 if any(v['status'] == 'failed' for v in value) else 0
+        once = command == 'watch' and args.once
         try:
-            return asyncio.run(synchronize())
+            synced, _ = asyncio.run(bridge.watch(args.interval, once, lambda line: print(line, flush=True)))
         except KeyboardInterrupt:
             return 0
+        return 1 if any(v['status'] == 'failed' for v in synced) else 0
+    elif command == 'session':
+        if args.session_command == 'add':
+            result = {'sessions': store.add_session(args.session)}
+        elif args.session_command == 'remove':
+            result = {'sessions': store.remove_session(args.session)}
+        elif args.session_command == 'status':
+            result = {'pending': store.wake_status()}
+        else:
+            result = {'sessions': store.sessions()}
     elif command == 'send':
-        result = asyncio.run(bridge.send(args.peer, args.text))
+        result = asyncio.run(bridge.send(args.peer, args.text, args.to_session, args.from_session))
+    elif command == 'message':
+        result = asyncio.run(bridge.send_message(args.peer, args.to_session, args.text,
+                                                 args.from_session, args.conversation_id))
     elif command == 'receive':
         result = asyncio.run(bridge.receive(args.wait))
     elif command == 'reply':
