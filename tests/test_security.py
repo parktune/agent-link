@@ -8,7 +8,7 @@ import unittest
 import uuid
 
 from codex_bridge.security import Bridge, endpoint
-from codex_bridge.security_store import Store
+from codex_bridge.security_store import Store, windows_powershell_env
 from codex_bridge.ssh_transport import SSHError, remote_command, run_json, ssh_argv
 
 
@@ -115,6 +115,21 @@ class MailboxTests(unittest.IsolatedAsyncioTestCase):
         secret = self.b.peer('alpha')['secret']
         self.assertNotIn(secret, json.dumps(self.b.peers()))
         self.assertNotIn('secret', json.dumps(self.b.peers()))
+
+    async def test_in_flight_revocation_prevents_local_ingestion(self):
+        self.a.send('beta', 'pending remote content', 'agent_message')
+        original = self.transport.request
+
+        async def revoke_before_return(route, payload):
+            response = await original(route, payload)
+            if payload['op'] == 'exchange':
+                self.b.revoke('alpha')
+            return response
+
+        self.transport.request = revoke_before_return
+        result = await self.bb.sync()
+        self.assertEqual(result[0]['status'], 'failed')
+        self.assertEqual(self.b.inbox(), [])
 
 
 class EnrollmentTests(unittest.TestCase):
@@ -258,7 +273,7 @@ class WindowsAclTests(unittest.TestCase):
                           "$rules=@($acl.Access | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }); "
                           "@{owner=$owner; rules=$rules; protected=$acl.AreAccessRulesProtected}|ConvertTo-Json -Compress")
                 encoded = base64.b64encode(script.encode('utf-16-le')).decode()
-                result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], capture_output=True, text=True, check=True)
+                result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], capture_output=True, text=True, check=True, env=windows_powershell_env())
                 acl = json.loads(result.stdout)
                 self.assertTrue(acl['protected'])
                 self.assertEqual(set(acl['rules']), {acl['owner'], 'S-1-5-18'})

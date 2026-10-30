@@ -85,5 +85,11 @@ GitHub CI는 모델을 호출하지 않는 프로토콜 테스트만 실행한�
 ```
 
 재현: `python scripts/verify_security_ssh.py --models` (로그인된 Codex, Linux sshd, 기존 /run/sshd 필요).
-regular CI는 모델을 호출하지 않는다. 최종 로컬 자동 테스트 40개 통과. 입력 위조·타 peer ack·
+regular CI는 모델을 호출하지 않는다. 자동 테스트 42개를 구성했으며 로컬에서는 Windows 전용 ACL 검사 1개를 제외한 41개가 통과했다. 입력 위조·타 peer ack·
 prune 후 재전송·실패 배치 rollback·기한 만료·정상 키 검증·Windows 명령 quoting·UTF-8 교환을 포함한다.
+
+
+Windows state ACL은 기존 소유권을 변경하지 않고 DACL만 현재 사용자/SYSTEM으로 교체한다.
+Windows 전용 regression은 사전에 명시적 Everyone ACE가 있던 디렉터리·DB에서도 해당 권한이
+제거되는지 검사한다. SSH 동기화 도중 로컬에서 peer를 폐기하면 응답을 수신함에 반영하지 않는
+경계도 테스트한다. CI의 Windows job에서는 Unix daemon socket 전용 검사 5개를 제외한다.

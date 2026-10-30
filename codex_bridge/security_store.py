@@ -43,6 +43,16 @@ def private_directory(path):
         path.chmod(0o700)
 
 
+def windows_powershell_env():
+    # A pwsh parent may export PS7 module paths incompatible with Windows PS5.1.
+    # Let the child reconstruct its own built-in module search path.
+    environment = dict(os.environ)
+    for key in list(environment):
+        if key.lower() == 'psmodulepath':
+            environment.pop(key)
+    return environment
+
+
 def windows_acl(path, *, directory=False):
     # Replace the DACL, rather than retaining any preexisting explicit Everyone ACE.
     path_literal = str(path).replace("'", "''")
@@ -57,7 +67,7 @@ def windows_acl(path, *, directory=False):
     )
     encoded = base64.b64encode(script.encode('utf-16-le')).decode()
     result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
-                            capture_output=True, timeout=15)
+                            capture_output=True, timeout=15, env=windows_powershell_env())
     if result.returncode:
         detail = result.stderr.decode('utf-8', errors='replace').replace(str(path), '<state>')
         raise RuntimeError('Cannot restrict Windows state permissions: ' + detail[-1500:])
