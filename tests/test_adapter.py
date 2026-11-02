@@ -117,27 +117,39 @@ class AdapterTests(Environment):
             del os.environ['CLAUDE_CODE_SESSION_ID']
 
 
-    async def test_claude_without_push_gets_a_watch_that_exits_on_mail(self):
+    async def claude_without_push(self):
         await self.server('gpu1', allow_origination='host')
         with mock.patch.dict(os.environ, {'CLAUDE_CODE_SESSION_ID': ''}):  # not the session running the tests
             adapter = Adapter('claude', self.root / 'gpu1/s.sock', channel=False)
         task = asyncio.create_task(adapter.run())
+        await until(lambda: adapter.client.connected)
+        return adapter, task
+
+    async def start_watch(self, command, watchers):
+        watchers.append(await asyncio.create_subprocess_exec(
+            *shlex.split(command), '--interval', '0.05', stdout=asyncio.subprocess.PIPE))
+        return watchers[-1]
+
+    async def stop(self, adapter, task, watchers):
+        for process in watchers:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await adapter.client.close()
+
+    async def test_claude_without_push_gets_a_watch_that_exits_on_mail(self):
+        adapter, task = await self.claude_without_push()
         watchers = []
         try:
-            await until(lambda: adapter.client.connected)
             self.assertNotIn('watch', adapter.whoami())  # nothing to watch before registering
             watch = (await adapter.register('head'))['watch']
-            self.assertIn('wait-box', watch)
-
-            async def start():
-                watchers.append(await asyncio.create_subprocess_exec(
-                    *shlex.split(watch), '--interval', '0.05', stdout=asyncio.subprocess.PIPE))
-                return watchers[-1]
-
-            first = await start()
-            box = Path(adapter.whoami()['box'])
-            await until(lambda: (box.parent / 'watch.pid').exists())
-            second = await start()  # armed twice: the second leaves at once
+            self.assertEqual((watch['enabled'], watch['running_pid']), (True, None))
+            self.assertIn('wait-box', watch['command'])
+            first = await self.start_watch(watch['command'], watchers)
+            await until(lambda: adapter.whoami()['watch']['running_pid'] == first.pid)
+            second = await self.start_watch(watch['command'], watchers)  # armed twice: the second leaves at once
             out, _ = await asyncio.wait_for(second.communicate(), 10)
             self.assertIn('already watched', out.decode())
             self.assertIsNone(first.returncode)
@@ -146,24 +158,51 @@ class AdapterTests(Environment):
             self.assertEqual((await sender.send('claude:head', 'ping'))['status'], 'stored')
             out, _ = await asyncio.wait_for(first.communicate(), 10)
             self.assertEqual((first.returncode, '1 unread message(s)' in out.decode()), (0, True))
-            self.assertFalse((box.parent / 'watch.pid').exists())
             reply = await adapter.call('check_box', {})
-            self.assertEqual(([m['content'] for m in reply['messages']], reply['watch']), (['ping'], watch))
+            self.assertEqual([m['content'] for m in reply['messages']], ['ping'])
+            self.assertEqual(reply['watch'], {**watch, 'running_pid': None})  # ready to arm again
         finally:
-            for process in watchers:
-                if process.returncode is None:
-                    process.kill()
-                    await process.wait()
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-            await adapter.client.close()
+            await self.stop(adapter, task, watchers)
 
-    def test_watch_only_for_claude_without_push(self):
-        identity = {'id': 'gpu1:claude:head', 'box': '/tmp/box/claude-head/received'}
+    async def test_settings_turn_the_watch_off_and_on_and_withdraw_the_session(self):
+        adapter, task = await self.claude_without_push()
+        watchers = []
+        try:
+            watch = (await adapter.call('register', {'name': 'head'}))['watch']
+            running = await self.start_watch(watch['command'], watchers)
+            await until(lambda: adapter.whoami()['watch']['running_pid'] == running.pid)
+
+            off = await adapter.call('set_watch', {'enabled': False})
+            self.assertEqual((off['watch']['enabled'], off['stopped_pid']), (False, running.pid))
+            out, _ = await asyncio.wait_for(running.communicate(), 10)
+            self.assertEqual((running.returncode, 'stopped' in out.decode()), (0, True))
+            self.assertFalse((await adapter.call('register', {'name': 'head'}))['watch']['enabled'])  # remembered
+
+            self.assertTrue((await adapter.call('set_watch', {'enabled': True}))['watch']['enabled'])
+            running = await self.start_watch(watch['command'], watchers)
+            await until(lambda: adapter.whoami()['watch']['running_pid'] == running.pid)
+
+            self.assertIn('gpu1:claude:head', [a['id'] for a in await adapter.call('list_agents', {})])
+            gone = await adapter.call('unregister', {})
+            self.assertEqual((gone['unregistered'], gone['registered'], gone['withdrawn']), ('gpu1:claude:head', False, True))
+            self.assertNotIn('watch', gone)
+            await asyncio.wait_for(running.wait(), 10)  # the watch stopped with the registration
+            self.assertNotIn('gpu1:claude:head', [a['id'] for a in await adapter.call('list_agents', {})])
+            with self.assertRaisesRegex(ProtocolError, 'unauthorized'):
+                await adapter.call('set_watch', {'enabled': True})
+            self.assertNotIn('withdrawn', await adapter.call('register', {'name': 'head'}))
+        finally:
+            await self.stop(adapter, task, watchers)
+
+    async def test_watch_only_for_claude_without_push(self):
+        identity = {'id': 'gpu1:claude:head', 'box': str(self.root / 'box/claude-head/received')}
         for tool, channel, expected in (('claude', False, True), ('claude', True, False), ('codex', None, False)):
             adapter = Adapter(tool, self.root / 's.sock', channel=channel)
             adapter.identity = identity
-            self.assertEqual(adapter.watch_command() is not None, expected, (tool, channel))
+            self.assertEqual(adapter.watch() is not None, expected, (tool, channel))
+            if not expected:
+                with self.assertRaisesRegex(ProtocolError, 'only for Claude'):
+                    adapter.set_watch(False)
 
 
 class WaitForMailTests(unittest.TestCase):
@@ -215,7 +254,8 @@ class StdioTests(Environment):
             process.stdin.write(encode({'jsonrpc': '2.0', 'method': 'notifications/initialized'}))
             tools = await call(2, 'tools/list', {})
             self.assertEqual({t['name'] for t in tools['result']['tools']},
-                             {'whoami', 'register', 'list_agents', 'send_message', 'check_box', 'recent_messages'})
+                             {'whoami', 'register', 'unregister', 'set_watch', 'list_agents', 'send_message', 'check_box',
+                              'recent_messages'})
             await until(lambda: True)
             await asyncio.sleep(0.3)  # adapter connects to the daemon in the background
             registered = await call(3, 'tools/call', {'name': 'register', 'arguments': {'name': 'head'}})

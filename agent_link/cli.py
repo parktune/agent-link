@@ -11,7 +11,7 @@ import socket
 import subprocess
 import sys
 
-from .box import Box, default_box_root, wait_for_mail
+from .box import Box, Stopped, default_box_root, wait_for_mail
 from .client import SpokeClient
 from .endpoint import relay
 from .hub import CONNECT_TIMEOUT, Hub, HubStore, SSHTransport, close_process, handshake
@@ -334,7 +334,11 @@ def agent_hub(argv=None):
     args = parser.parse_args(argv)
 
     if args.command == 'wait-box':
-        count, other = wait_for_mail(args.box, args.interval)
+        try:
+            count, other = wait_for_mail(args.box, args.interval)
+        except Stopped:
+            print(f'agent-link: watch on {args.box} stopped', flush=True)
+            return 0
         if other:
             print(f'agent-link: {args.box} is already watched (pid {other}); nothing to do', flush=True)
         else:

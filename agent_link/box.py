@@ -2,11 +2,13 @@
 
 Used when a message cannot be pushed into an open session: the session is closed, push is not
 available for it, or the push failed. Layout: <root>/<tool>-<name>/received/[read/]<file>.md, plus
-<root>/<tool>-<name>/watch.pid while a session waits for mail with `agent-hub wait-box`.
+<root>/<tool>-<name>/watch.pid while a session waits for mail with `agent-hub wait-box`, and
+<root>/<tool>-<name>/watch.off when the user turned that watch off.
 """
 import os
 from pathlib import Path
 import re
+import signal
 import time
 
 from .protocol import parse_target
@@ -65,8 +67,19 @@ class Box:
         return len(list(folder.glob('*.md'))) if folder.is_dir() else 0
 
 
-def waiter_alive(lock):
-    """PID of another live `wait-box` recorded in this lock file, or None."""
+class Stopped(Exception):
+    """The waiter was asked to stop (SIGTERM from `stop_waiter`)."""
+
+
+def watch_files(folder):
+    """(watch.pid, watch.off) next to a received/ folder."""
+    parent = Path(folder).parent
+    return parent / 'watch.pid', parent / 'watch.off'
+
+
+def waiter_alive(folder):
+    """PID of another live `wait-box` watching this received/ folder, or None."""
+    lock, _ = watch_files(folder)
     try:
         pid = int(lock.read_text())
         os.kill(pid, 0)
@@ -78,17 +91,49 @@ def waiter_alive(lock):
     return pid if pid != os.getpid() else None
 
 
+def stop_waiter(folder):
+    """Stop the live waiter of this folder, if any, and return its PID."""
+    pid = waiter_alive(folder)
+    if pid:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            return None
+    return pid
+
+
+def set_watch_enabled(folder, enabled):
+    """Remember the user's choice; turning the watch off also stops a running waiter."""
+    _, off = watch_files(folder)
+    if enabled:
+        off.unlink(missing_ok=True)
+        return None
+    _private(off.parent)
+    off.touch()
+    return stop_waiter(folder)
+
+
+def watch_enabled(folder):
+    return not watch_files(folder)[1].exists()
+
+
 def wait_for_mail(folder, interval=2.0, sleep=time.sleep):
     """Block until the received/ folder holds an unread message and return (count, None).
 
     Return (0, pid) at once when another live waiter already watches this folder, so a session
     that arms the watch twice keeps one. The folder may not exist yet (no mail so far).
+    Raise Stopped on SIGTERM, which `stop_waiter` sends.
     """
     folder = Path(folder)
-    lock = folder.parent / 'watch.pid'
-    other = waiter_alive(lock)
+    lock, _ = watch_files(folder)
+    other = waiter_alive(folder)
     if other:
         return 0, other
+
+    def stop(*_):
+        raise Stopped()
+
+    previous = signal.signal(signal.SIGTERM, stop)
     _private(folder.parent)
     lock.write_text(f'{os.getpid()}\n')
     try:
@@ -98,6 +143,7 @@ def wait_for_mail(folder, interval=2.0, sleep=time.sleep):
                 return count, None
             sleep(interval)
     finally:
+        signal.signal(signal.SIGTERM, previous)
         try:
             if int(lock.read_text()) == os.getpid():
                 lock.unlink()
