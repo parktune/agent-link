@@ -7,7 +7,7 @@
 
 | ID | 확인 | 방법 | 기대 |
 |---|---|---|---|
-| M0-1 | Claude channel 주입 | 로컬에서 `hubctl serve`를 실행한다. 터미널 A에서 `claude --dangerously-load-development-channels server:agent-link`를 열고 `/agent-link:register main`, 터미널 B에서 일반 `claude`를 열고 `/agent-link:register other` 후 `/agent-link:send main 안녕` | A 화면에 `← agent-link: 안녕`이 나타나고 A가 응답한다. `whoami`의 `push.available=true` |
+| M0-1 | Claude channel 주입 | 로컬에서 `hubctl serve`를 실행한다. 터미널 A에서 `claude --dangerously-load-development-channels server:agent-link`를 열고 `/agent-link:register main`, 터미널 B에서 일반 `claude`를 열고 `/agent-link:register other` 후 `/agent-link main 안녕` | A 화면에 `← agent-link: 안녕`이 나타나고 A가 응답한다. `whoami`의 `push.available=true` |
 | M0-2 | 플래그 없는 Claude | M0-1의 B 세션(플래그 없음)으로 보낸다 | `stored`, `<repo>/hub/claude-other/received/`에 파일이 생긴다 |
 | M0-3 | `CLAUDE_CODE_SESSION_ID` | M0-1 세션에서 `/mcp`로 agent-link를 다시 연결한다 | 다시 묻지 않고 같은 이름으로 복구된다(주입될 때만) |
 | M0-4 | Codex `codex queue` 주입 | Codex를 열고 `$agent-link:register`로 등록한다. 스킬이 `printenv CODEX_THREAD_ID`를 시도한다. 다른 세션에서 그 Codex로 보낸다 | Codex TUI에 `[agent-link] request ...` 메시지가 들어가 처리된다. 안 되면 `stored` + 박스 파일 |

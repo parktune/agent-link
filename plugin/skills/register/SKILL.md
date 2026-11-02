@@ -5,7 +5,7 @@ description: Register this Claude Code or Codex session in agent-link so other a
 
 # agent-link: register
 
-Registers this session with the agent-link daemon on this machine (the hub on the user's PC, the spoke daemon on a server). Its ID becomes `host:tool:name`. Use the `agent-link` MCP tools `whoami` and `register`. Sending and reading messages is `agent-link:send`.
+Registers this session with the agent-link daemon on this machine (the hub on the user's PC, the spoke daemon on a server). Its ID becomes `host:tool:name`. Use the `agent-link` MCP tools `whoami` and `register`. Sending and reading messages is `/agent-link` (Codex `$agent-link`).
 
 ## 1. Check the current state
 
@@ -28,5 +28,5 @@ If the session is already registered under the chosen name, just report it (step
 
 Tell the user the resulting ID and mailbox folder in one or two lines. If `push.available` is false, explain once:
 
-- Claude: start Claude Code with `claude --dangerously-load-development-channels server:agent-link` to receive messages live in this session. Until then they are saved to the mailbox and read with `agent-link:send`.
+- Claude: start Claude Code with `claude --dangerously-load-development-channels server:agent-link` to receive messages live in this session. Until then they are saved to the mailbox and read with `/agent-link`.
 - Codex: the thread is unknown, so messages are saved to the mailbox.

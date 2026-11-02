@@ -1,9 +1,9 @@
 ---
-name: send
-description: Send a message to another AI agent session (Claude Code or Codex, on this machine or another server) through agent-link, or read this session's agent-link mailbox. Use when the user invokes agent-link:send (/agent-link:send, $agent-link:send), names another agent session to message ("gpu-server-1의 project-head 세션에게 ..."), or asks about received agent messages. Registration itself is agent-link:register.
+name: agent-link
+description: Send a message to another AI agent session (Claude Code or Codex, on this machine or another server) through agent-link, or read this session's agent-link mailbox. Use when the user invokes /agent-link or $agent-link, names another agent session to message ("gpu-server-1의 project-head 세션에게 ..."), or asks about received agent messages. Registration itself is agent-link:register.
 ---
 
-# agent-link: send
+# agent-link
 
 agent-link connects Claude Code and Codex sessions across the user's PC and servers. Every session has an ID `host:tool:name` (for example `gpu-server-1:claude:project-head`; sessions on the user's PC use host `local`). Use the `agent-link` MCP tools: `whoami`, `register`, `list_agents`, `send_message`, `check_box`, `recent_messages`.
 
@@ -17,7 +17,7 @@ Call `whoami`.
 - `registered` false: register quietly under the session's own name and go on.
   - Claude: if `whoami` shows a valid `session_name` (set with `/rename`), call `register()` with no arguments.
   - Codex: run `printenv CODEX_THREAD_ID`; if it prints an ID, call `register(thread_id=<ID>)`.
-  - If that fails (no `/rename` name, or the name has characters other than letters, digits, `_ . -`), stop and tell the user to name the session with `/rename <name>` or run `agent-link:register` (`/agent-link:register`, Codex `$agent-link:register`). Never invent a name.
+  - If that fails (no `/rename` name, or the name has characters other than letters, digits, `_ . -`), stop and tell the user to name the session with `/rename <name>` or run `/agent-link:register` (Codex `$agent-link:register`). Never invent a name.
   - Mention the registered ID in one line. If `push.available` is false, add once that messages for this session go to its mailbox (registration explains how to receive them live).
 
 ## 2. Send a message

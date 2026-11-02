@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Install the agent-link plugin (skills agent-link:send, agent-link:register) and MCP server for
-Claude Code and Codex on this machine.
+"""Install agent-link for Claude Code and Codex on this machine: the /agent-link skill, the
+agent-link plugin (agent-link:register) and the MCP server.
 
 Run from the clone after `pip install -e .` into the repo's .venv. Changes the user's own config
-only: this repo becomes a local plugin marketplace named `agent-link`, the plugin is installed from
-it, and the MCP server `agent-link` is added at user scope. Standalone `agent-link` skills left by
-earlier versions are removed. --replace reinstalls; --dry-run only prints the plan.
+only: the standalone skill is copied to ~/.claude/skills and ~/.codex/skills, this repo becomes a
+local plugin marketplace named `agent-link` and the plugin is installed from it, and the MCP server
+`agent-link` is added at user scope. --replace reinstalls; --dry-run only prints the plan.
 """
 import argparse
 import json
@@ -15,13 +15,24 @@ import subprocess
 import sys
 
 REPO = Path(__file__).resolve().parents[1]
+SKILL = REPO / 'skills' / 'agent-link'
 MCP = Path(sys.executable).with_name('agent-link-mcp')
 PLUGIN = 'agent-link@agent-link'
+HOMES = {'claude': Path.home() / '.claude', 'codex': Path.home() / '.codex'}
 
 
 def output(argv):
     result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
     return result.stdout if result.returncode == 0 else ''
+
+
+def skill_plan(tool):
+    """Copy the /agent-link skill; refresh our own copy on every run, never overwrite someone else's."""
+    target = HOMES[tool] / 'skills' / 'agent-link'
+    current = (target / 'SKILL.md').read_text(errors='replace') if (target / 'SKILL.md').exists() else None
+    if current is not None and 'name: agent-link' not in current:
+        return [('note', f'keep {target}: it is not the agent-link skill')]
+    return [('copy', target)]
 
 
 def claude_plan(replace):
@@ -61,15 +72,6 @@ def mcp_plan(tool, replace):
     return steps
 
 
-def old_skills():
-    """Standalone skills written by agent-link <= 0.4 (now provided by the plugin)."""
-    for home in (Path.home() / '.claude', Path.home() / '.codex'):
-        skill = home / 'skills' / 'agent-link'
-        text = (skill / 'SKILL.md').read_text(errors='replace') if (skill / 'SKILL.md').exists() else ''
-        if 'name: agent-link' in text:
-            yield skill
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--replace', action='store_true', help='Reinstall the plugin and MCP registration')
@@ -78,20 +80,26 @@ def main():
     if not MCP.exists():
         raise SystemExit(f'{MCP} not found. Run: {REPO}/.venv/bin/python -m pip install -e {REPO}')
     prefix = '[dry-run] ' if args.dry_run else ''
-    for skill in old_skills():
-        print(f'{prefix}remove old standalone skill {skill}', flush=True)
-        if not args.dry_run:
-            shutil.rmtree(skill)
     for tool, plan in (('claude', claude_plan), ('codex', codex_plan)):
         if not shutil.which(tool):
             print(f'skip {tool}: CLI not found', flush=True)
             continue
+        for kind, target in skill_plan(tool):
+            if kind == 'note':
+                print(target, flush=True)
+                continue
+            print(f'{prefix}install /agent-link skill -> {target}', flush=True)
+            if not args.dry_run:
+                shutil.rmtree(target, ignore_errors=True)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(SKILL, target)
         for step in plan(args.replace) + mcp_plan(tool, args.replace):
             print(prefix + 'run ' + ' '.join(step), flush=True)
             if not args.dry_run:
                 subprocess.run(step, check=True, timeout=120)
     if not args.dry_run:
-        print('Done. Restart open Claude Code / Codex sessions; then use agent-link:register and agent-link:send.')
+        print('Done. Restart open Claude Code / Codex sessions; then use /agent-link:register and /agent-link '
+              '(Codex: $agent-link:register, $agent-link).')
 
 
 if __name__ == '__main__':

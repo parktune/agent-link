@@ -16,7 +16,7 @@
 | 미로드 시 동작 | 확인(문서) | 세션이 channel로 로드하지 않았거나 조직 정책이 막으면 **알림을 조용히 버리고 오류를 주지 않는다**. 그래서 어댑터는 상위 프로세스 명령행에서 플래그를 읽고, 없으면 박스 저장으로 전환한다 |
 | 조직 정책 | 확인(문서) | Team/Enterprise는 관리자가 `channelsEnabled`를 켜야 한다. 플래그는 allowlist만 우회하고 이 정책은 우회하지 않는다 |
 | `CLAUDE_CODE_SESSION_ID` | 미검증 | 바이너리에 문자열은 있다. stdio MCP 하위 프로세스에 주입되는지는 실제 세션에서 확인한다. 주입되면 세션 재시작 때 등록이 자동 복구되고, 없어도 기능에는 지장이 없다 |
-| MCP 환경변수 전달 | 설계로 우회 | 세션 이름을 환경변수(`AGENT_HUB_NAME`)로 넘기지 않는다. `agent-link:register`(또는 첫 `agent-link:send`)를 쓸 때 등록하는 방식으로 바꿨다(ADR 0003) |
+| MCP 환경변수 전달 | 설계로 우회 | 세션 이름을 환경변수(`AGENT_HUB_NAME`)로 넘기지 않는다. `/agent-link:register`(또는 첫 `/agent-link`)를 쓸 때 등록하는 방식으로 바꿨다(ADR 0003) |
 | 서버 이름과 플래그 | 미검증 | `claude mcp add --scope user agent-link`로 등록한 서버가 `server:agent-link`로 로드되는지 확인한다. 문서 예시는 `.mcp.json` 서버다 |
 
 ## Codex 수신 방식 (12장, 15장 1번)

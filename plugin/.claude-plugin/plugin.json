@@ -1,9 +1,17 @@
 {
   "name": "agent-link",
-  "version": "0.5.0",
-  "description": "Message Claude Code and Codex sessions on your PC and servers: agent-link:send to send and read, agent-link:register to register a session.",
-  "author": {"name": "Taeyoon Park", "url": "https://github.com/parktune"},
+  "version": "0.5.1",
+  "description": "Register a Claude Code or Codex session in agent-link (agent-link:register). Sending is the /agent-link skill installed by setup.sh.",
+  "author": {
+    "name": "Taeyoon Park",
+    "url": "https://github.com/parktune"
+  },
   "repository": "https://github.com/parktune/agent-link",
   "license": "Apache-2.0",
-  "keywords": ["agents", "messaging", "codex", "ssh"]
+  "keywords": [
+    "agents",
+    "messaging",
+    "codex",
+    "ssh"
+  ]
 }
