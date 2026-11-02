@@ -237,6 +237,26 @@ class ResumeTests(unittest.TestCase):
         _, ran = self.run_cli('--continue')
         self.assertEqual(ran['argv'][-1], '--continue')
 
+    def test_team_login_without_channels_opens_without_the_flag_and_arms_the_watch(self):
+        from agent_link.cli import ARM_WATCH
+        sid = '11111111-2222-3333-4444-555555555555'
+        self.transcript(sid, 'project-head', self.work)
+        (self.root / 'claude' / '.claude.json').write_text(json.dumps({'oauthAccount': {'organizationType': 'claude_team'}}))
+        result, ran = self.run_cli('--resume', 'project-head')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(ran['argv'], ['--resume', sid, ARM_WATCH])
+        self.assertNotIn('--dangerously-load-development-channels', ran['argv'])
+        self.assertIn('messages go to the mailbox', result.stderr)
+        _, ran = self.run_cli('--continue')
+        self.assertEqual(ran['argv'], ['--continue', ARM_WATCH])
+        result, ran = self.run_cli('--resume')  # the picker cannot take a first prompt
+        self.assertEqual(ran['argv'], ['--resume'])
+        self.assertIn('/agent-link:register', result.stderr)
+        (self.root / 'claude' / 'remote-settings.json').write_text(json.dumps({'channelsEnabled': True}))
+        result, ran = self.run_cli('--resume', 'project-head')
+        self.assertEqual(ran['argv'][:2], ['--dangerously-load-development-channels', 'server:agent-link'])
+        self.assertIn('push', result.stderr)
+
     def test_unknown_name_and_mixing_with_subcommands_are_errors(self):
         result, ran = self.run_cli('--resume', 'nobody')
         self.assertEqual((result.returncode, ran), (1, None))

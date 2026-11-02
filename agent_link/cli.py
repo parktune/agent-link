@@ -562,17 +562,30 @@ def show_status(socket_path, as_json=False):
 CHANNEL = ['--dangerously-load-development-channels', 'server:agent-link']
 
 
+# First prompt for a session that cannot get pushes: only the session itself can start the background
+# watch that wakes it when mail arrives.
+ARM_WATCH = ('agent-link: this session receives agent-link messages through its mailbox, because the organization '
+             'keeps Claude Channels off. Call the agent-link whoami tool. If it is not registered and not withdrawn, '
+             'call register() with no arguments. Then, if watch.enabled is true and watch.running_pid is null, run '
+             'watch.command exactly as given with Bash run_in_background: true. Answer in one line that the mailbox '
+             'watch is on, then wait for the user.')
+
+
 def open_claude(resume=None, continue_=False, extra=()):
-    """Run claude with the agent-link channel, resuming a session by name or ID, picking one, or continuing."""
+    """Run claude so this session receives agent-link messages.
+
+    Where the login may use Channels, add the agent-link channel flag (push). Where the organization keeps
+    Channels off, the flag would only be ignored, so open without it and pass a first prompt that arms the
+    mailbox watch. Resumes a session by name or ID, opens the picker, or continues this folder's latest one.
+    """
     from .inject import claude_channel_policy
     from .sessions import find_claude_sessions
     if not shutil.which('claude'):
         raise SystemExit('claude (Claude Code) is not on PATH')
-    extra = list(extra)
     if continue_:
-        argv = ['claude', *CHANNEL, '--continue', *extra]
+        mode, picker = ['--continue'], False
     elif not resume:
-        argv = ['claude', *CHANNEL, '--resume', *extra]
+        mode, picker = ['--resume'], True
     else:
         found = find_claude_sessions(resume)
         if not found:
@@ -584,11 +597,19 @@ def open_claude(resume=None, continue_=False, extra=()):
                   f'opening the most recent one', file=sys.stderr)
         if session['cwd'] and os.path.isdir(session['cwd']):
             os.chdir(session['cwd'])  # claude --resume only finds sessions of the folder it starts in
-        argv = ['claude', *CHANNEL, '--resume', session['id'], *extra]
+        mode, picker = ['--resume', session['id']], False
     blocked = claude_channel_policy()
-    if blocked:
-        print(f'agent-link: note: {blocked}', file=sys.stderr)
-    print(f'agent-link: {shlex.join(argv)}  (in {os.getcwd()})', file=sys.stderr, flush=True)
+    if not blocked:
+        argv = ['claude', *CHANNEL, *mode, *extra]
+        print('agent-link: messages arrive live in this session (push).', file=sys.stderr)
+    else:
+        argv = ['claude', *mode, *extra] + ([] if picker else [ARM_WATCH])
+        print(f'agent-link: {blocked}.', file=sys.stderr)
+        print('agent-link: messages go to the mailbox; ' + (
+            'after the session opens, run /agent-link:register to start the watch that wakes it.' if picker else
+            'the session starts the mailbox watch as its first step and wakes when mail arrives.'), file=sys.stderr)
+    shown = [part if part != ARM_WATCH else '<arm the mailbox watch>' for part in argv]
+    print(f'agent-link: {shlex.join(shown)}  (in {os.getcwd()})', file=sys.stderr, flush=True)
     os.execvp('claude', argv)
 
 
