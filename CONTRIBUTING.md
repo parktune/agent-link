@@ -19,8 +19,7 @@ Layout:
 | `agent_link/box.py` | Mailbox folders |
 | `agent_link/mcp_adapter.py`, `inject.py`, `client.py` | Session adapter (MCP server) and push into Claude/Codex |
 | `agent_link/cli.py` | `agent-link hub`, `agent-link` |
-| `skills/agent-link/SKILL.md` | Standalone `/agent-link` (`$agent-link`) skill: send and read messages. Copied by `scripts/install.py` |
-| `plugin/` | Plugin for Claude Code and Codex with the `agent-link:register` (register, restart command with the channel flag) and `agent-link:settings` (withdraw, rename, mailbox watch) skills. `.claude-plugin/marketplace.json` at the repo root lists it so only this folder is installed |
+| `skills/agent-link/SKILL.md` | The `/agent-link` (`$agent-link`) skill: send, read the mailbox, this session's settings |
 
 Record significant decisions as ADRs in `docs/adr/`. Keep the manual scenarios in
 `docs/manual-scenarios.md` in step with the tests. Never commit `hub/`, `spoke/`, `.runtime/`,

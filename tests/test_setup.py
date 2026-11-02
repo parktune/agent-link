@@ -251,7 +251,7 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(ran['argv'], ['--continue', ARM_WATCH])
         result, ran = self.run_cli('--resume')  # the picker cannot take a first prompt
         self.assertEqual(ran['argv'], ['--resume'])
-        self.assertIn('/agent-link:register', result.stderr)
+        self.assertIn('run /agent-link once', result.stderr)
         (self.root / 'claude' / 'remote-settings.json').write_text(json.dumps({'channelsEnabled': True}))
         result, ran = self.run_cli('--resume', 'project-head')
         self.assertEqual(ran['argv'][:2], ['--dangerously-load-development-channels', 'server:agent-link'])

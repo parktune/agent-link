@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Install agent-link for Claude Code and Codex on this machine: the /agent-link skill, the
-agent-link plugin (agent-link:register, agent-link:settings) and the MCP server.
+"""Install agent-link for Claude Code and Codex on this machine: the /agent-link skill and the MCP server.
 
 Run from the clone after `pip install -e .` into the repo's .venv. Changes the user's own config
-only: the standalone skill is copied to ~/.claude/skills and ~/.codex/skills, this repo becomes a
-local plugin marketplace named `agent-link` and the plugin is installed from it, and the MCP server
-`agent-link` is added at user scope. --replace reinstalls; --dry-run only prints the plan.
+only: the skill is copied to ~/.claude/skills and ~/.codex/skills and the MCP server `agent-link` is
+added at user scope. The agent-link plugin and marketplace of 0.5-0.7 (agent-link:register,
+agent-link:settings) are removed. --replace reinstalls; --dry-run only prints the plan.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -40,30 +40,40 @@ def skill_plan(tool):
 
 
 def claude_plan(replace):
+    """Remove the retired agent-link plugin and its local marketplace, if a previous version installed them."""
     steps = []
-    marketplaces = {m.get('name') for m in json.loads(output(['claude', 'plugin', 'marketplace', 'list', '--json']) or '[]')}
-    if 'agent-link' not in marketplaces:
-        steps.append(['claude', 'plugin', 'marketplace', 'add', str(REPO)])
     installed = {p.get('id') for p in json.loads(output(['claude', 'plugin', 'list', '--json']) or '[]')}
-    # A marketplace added from a local path loads the plugin in place, so edits need no reinstall.
-    if PLUGIN not in installed:
-        steps.append(['claude', 'plugin', 'install', PLUGIN])
+    if PLUGIN in installed:
+        steps.append(['claude', 'plugin', 'uninstall', PLUGIN])
+    marketplaces = {m.get('name') for m in json.loads(output(['claude', 'plugin', 'marketplace', 'list', '--json']) or '[]')}
+    if 'agent-link' in marketplaces:
+        steps.append(['claude', 'plugin', 'marketplace', 'remove', 'agent-link'])
     return steps
 
 
+def codex_config():
+    import tomllib
+    path = Path(os.environ.get('CODEX_HOME') or HOMES['codex']) / 'config.toml'
+    try:
+        with path.open('rb') as handle:
+            return tomllib.load(handle)
+    except (OSError, ValueError):
+        return {}
+
+
 def codex_plan(replace):
-    steps = []
-    marketplaces = {line.split()[0] for line in output(['codex', 'plugin', 'marketplace', 'list']).splitlines()[1:] if line.strip()}
-    if 'agent-link' not in marketplaces:
-        steps.append(['codex', 'plugin', 'marketplace', 'add', str(REPO)])
-    # Without -m, `codex plugin list` also fetches remote marketplaces and can hang.
-    rows = [line for line in output(['codex', 'plugin', 'list', '-m', 'agent-link']).splitlines()
-            if line.startswith(PLUGIN + ' ')]
-    installed = bool(rows) and 'not installed' not in rows[0]
-    if installed and replace:
-        steps.append(['codex', 'plugin', 'remove', PLUGIN])  # Codex installs a cached copy
-    if not installed or replace:
-        steps.append(['codex', 'plugin', 'add', PLUGIN])
+    """Remove the retired plugin, its marketplace and the 0.2 MCP server, read from Codex's config.toml.
+
+    `codex plugin marketplace list` fails once the marketplace manifest is gone, so it cannot tell.
+    """
+    config, steps = codex_config(), []
+    if PLUGIN in (config.get('plugins') or {}):
+        steps.append(['codex', 'plugin', 'remove', PLUGIN])
+    if 'agent-link' in (config.get('marketplaces') or {}):
+        steps.append(['codex', 'plugin', 'marketplace', 'remove', 'agent-link'])
+    for name, server in (config.get('mcp_servers') or {}).items():
+        if name != 'agent-link' and 'codex_bridge' in ' '.join(map(str, server.get('args') or [])):
+            steps.append(['codex', 'mcp', 'remove', name])  # agent-link 0.2 (codex_bridge) is gone
     return steps
 
 
@@ -99,13 +109,16 @@ def main():
                 shutil.rmtree(target, ignore_errors=True)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(SKILL, target)
-        for step in plan(args.replace) + mcp_plan(tool, args.replace):
+        for step in plan(args.replace):  # cleanup of earlier versions: report failures, keep going
+            print(prefix + 'run ' + ' '.join(step), flush=True)
+            if not args.dry_run and subprocess.run(step, capture_output=True, timeout=120).returncode:
+                print(f'note: {" ".join(step)} failed; remove it by hand if it is still there', flush=True)
+        for step in mcp_plan(tool, args.replace):
             print(prefix + 'run ' + ' '.join(step), flush=True)
             if not args.dry_run:
                 subprocess.run(step, check=True, timeout=120)
     if not args.dry_run:
-        print('Done. Restart open Claude Code / Codex sessions; then use /agent-link:register and /agent-link '
-              '(Codex: $agent-link:register, $agent-link).')
+        print('Done. Reopen Claude Code / Codex sessions to load /agent-link ($agent-link in Codex).')
 
 
 if __name__ == '__main__':

@@ -48,28 +48,27 @@ agent-link status --json   # 재연결 횟수·마지막 오류까지 전부
 
 ## 사용법
 
-`setup.sh`가 Claude Code·Codex에 명령 세 개를 설치합니다.
-
-| 스킬 | Claude | Codex | 하는 일 |
-|---|---|---|---|
-| 등록 | `/agent-link:register [이름]` | `$agent-link:register [이름]` | 이 세션을 등록합니다(이름을 안 주면 `/rename`으로 붙인 세션 이름). 플래그 없이 연 Claude 세션이면 채널 플래그를 붙여 같은 세션 이름으로 resume하는 명령을 알려 줍니다 |
-| 설정 | `/agent-link:settings [동작]` | `$agent-link:settings [동작]` | 동작 없이 쓰면 현재 설정을 보여 줍니다. `register <이름>` 다른 이름으로 다시 등록, `unregister` 등록 철회, `watch on`·`watch off` 우편함 감시 시작·종료(플래그 없이 연 Claude 세션) |
-| 보내기·확인 | `/agent-link <세션> <내용>` | `$agent-link <세션> <내용>` | 메시지를 보냅니다. 내용 없이 쓰면 받은 메시지(박스)를 확인합니다 |
+| 할 일 | 명령 |
+|---|---|
+| 세션을 메시지를 받을 수 있게 열기 | 터미널에서 `agent-link --resume <세션 이름>` |
+| 메시지 보내기 | Claude `/agent-link <세션> <내용>`, Codex `$agent-link <세션> <내용>` |
+| 받은 메시지(박스) 확인 | `/agent-link` (내용 없이) |
+| 이 세션 설정 | `/agent-link` 뒤에 말로: 이름 바꾸기, 등록 철회, 박스 감시 켜기·끄기 |
 
 ```
-/agent-link:register
+agent-link --resume project-head
 /agent-link gpu-server-1의 project-head 세션에게 학습 현황 보고를 요청해
 $agent-link trainer 체크포인트 경로 알려줘
 /agent-link                 ← 받은 메시지(박스) 확인
 ```
 
-- 등록하지 않은 세션에서 `/agent-link`를 쓰면 세션 이름(`/rename`)으로 자동 등록하고 진행합니다. 세션 이름이 없을 때만 `/agent-link:register`를 먼저 쓰라고 안내합니다. 이 세션에서 등록을 철회했으면 다시 등록하지 않습니다. 세션 ID는 `호스트:도구:이름`입니다(예: `gpu-server-1:claude:project-head`, 로컬 PC는 `local:claude:main`).
+- 세션은 처음 `/agent-link`를 쓰거나 `agent-link --resume`으로 열 때 세션 이름(`/rename`)으로 등록됩니다. 세션 이름이 없을 때만 이름을 묻습니다. 등록을 철회한 세션은 다시 자동 등록하지 않습니다. 세션 ID는 `호스트:도구:이름`입니다(예: `gpu-server-1:claude:project-head`, 로컬 PC는 `local:claude:main`).
 - 보낸 세션은 기다리지 않고 하던 일을 계속합니다. 회신은 나중에 도착합니다.
 - **받는 쪽:** 세션이 열려 있으면 그 세션에 바로 들어갑니다.
-  - Claude: 가장 쉬운 방법은 `agent-link --resume <세션 이름>`입니다. `/rename`한 이름(또는 세션 ID)으로 세션을 찾아 그 폴더에서 다시 열면서 계정에 맞는 수신 방식을 고릅니다. Channels를 쓸 수 있는 계정이면 채널 플래그를 붙여 push로 받고, 조직이 Channels를 막은 Team/Enterprise 계정이면 플래그 없이 열고 첫 입력으로 박스 감시를 켜서 메일이 오면 세션이 깨어나게 합니다. 이름 없이 `agent-link --resume`은 고르기 화면, `agent-link --continue`는 지금 폴더의 가장 최근 대화입니다. claude에 넘길 인자는 `--` 뒤에 씁니다(`agent-link --resume project-head -- --model opus`). 새 세션은 `claude --dangerously-load-development-channels server:agent-link`로 엽니다. 플래그 없이 연 세션에서 `/agent-link:register`를 쓰면 다시 열 명령을 알려 줍니다.
+  - Claude: 가장 쉬운 방법은 `agent-link --resume <세션 이름>`입니다. `/rename`한 이름(또는 세션 ID)으로 세션을 찾아 그 폴더에서 다시 열면서 계정에 맞는 수신 방식을 고릅니다. Channels를 쓸 수 있는 계정이면 채널 플래그를 붙여 push로 받고, 조직이 Channels를 막은 Team/Enterprise 계정이면 플래그 없이 열고 첫 입력으로 박스 감시를 켜서 메일이 오면 세션이 깨어나게 합니다. 이름 없이 `agent-link --resume`은 고르기 화면, `agent-link --continue`는 지금 폴더의 가장 최근 대화입니다. claude에 넘길 인자는 `--` 뒤에 씁니다(`agent-link --resume project-head -- --model opus`). 새 세션은 `claude --dangerously-load-development-channels server:agent-link`로 엽니다.
   - Codex: 스레드 ID 또는 `/rename` 이름으로 등록한 세션이어야 합니다(`codex queue`).
 - 바로 넣을 수 없으면 박스에 저장합니다. 세션이 닫혀 있거나, push가 안 되는 세션이거나, push가 실패한 경우입니다.
-  - 플래그 없이 연 Claude 세션은 등록할 때(또는 첫 `/agent-link`) 박스 감시를 백그라운드로 겁니다(`agent-link wait-box`). 메시지가 박스에 들어오면 몇 초 안에 세션이 깨어나 읽습니다. 세션이 열려 있는 동안만 동작합니다. `/agent-link:settings watch off`로 끄면 그 이름에는 다시 걸지 않고, `watch on`으로 다시 켭니다.
+  - push가 안 되는 Claude 세션은 `agent-link --resume`으로 열 때(또는 첫 `/agent-link`) 박스 감시를 백그라운드로 겁니다(`agent-link wait-box`). 메시지가 박스에 들어오면 몇 초 안에 세션이 깨어나 읽습니다. 세션이 열려 있는 동안만 동작합니다. `/agent-link 박스 감시 꺼`처럼 말하면 끄고, 그 이름에는 다시 걸지 않습니다.
   - 로컬 PC: `<repo>/hub/<tool>-<name>/received/*.md`
   - 서버: `<repo>/spoke/<tool>-<name>/received/*.md`
   - 메시지 1건이 Markdown 파일 1개입니다. `/agent-link`로 확인하면 `received/read/`로 옮깁니다.

@@ -691,7 +691,7 @@ def open_claude(resume=None, continue_=False, extra=()):
         argv = ['claude', *mode, *extra] + ([] if picker else [ARM_WATCH])
         print(f'agent-link: {blocked}.', file=sys.stderr)
         print('agent-link: messages go to the mailbox; ' + (
-            'after the session opens, run /agent-link:register to start the watch that wakes it.' if picker else
+            'after the session opens, run /agent-link once to start the watch that wakes it.' if picker else
             'the session starts the mailbox watch as its first step and wakes when mail arrives.'), file=sys.stderr)
     shown = [part if part != ARM_WATCH else '<arm the mailbox watch>' for part in argv]
     print(f'agent-link: {shlex.join(shown)}  (in {os.getcwd()})', file=sys.stderr, flush=True)

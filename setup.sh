@@ -37,7 +37,7 @@ fi
 echo "[2/4] installed agent-link $(.venv/bin/python -c 'import agent_link; print(agent_link.__version__)')"
 
 .venv/bin/python scripts/install.py --replace | sed 's/^/      /'
-echo "[3/4] installed /agent-link, the agent-link:register/settings plugin and the MCP server"
+echo "[3/4] installed the /agent-link skill and the MCP server"
 
 mkdir -p "$HOME/.local/bin"
 ln -sf "$REPO/.venv/bin/agent-link" "$HOME/.local/bin/agent-link"
@@ -67,6 +67,5 @@ Next:
   server   : nothing else. The hub starts this server's daemon when it connects.
   local PC : agent-link hub discover   (pick servers from ~/.ssh/config)  or  agent-link hub add-host <ssh-alias>
 Then open Claude with live messages:  agent-link --resume <session name>   (or: agent-link --resume  to pick one)
-and use /agent-link:register to register the session, /agent-link to message others
-(Codex: $agent-link:register, $agent-link).
+and use /agent-link to message others (Codex: $agent-link); a session registers itself on first use.
 EOF

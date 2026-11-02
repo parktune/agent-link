@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-link"
-version = "0.7.0"
+version = "0.7.1"
 description = "Hub-and-spoke messaging between Claude Code and Codex sessions on many servers"
 requires-python = ">=3.11"
 license = "Apache-2.0"
