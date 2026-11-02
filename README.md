@@ -66,7 +66,7 @@ $agent-link trainer 체크포인트 경로 알려줘
 - 등록하지 않은 세션에서 `/agent-link`를 쓰면 세션 이름(`/rename`)으로 자동 등록하고 진행합니다. 세션 이름이 없을 때만 `/agent-link:register`를 먼저 쓰라고 안내합니다. 이 세션에서 등록을 철회했으면 다시 등록하지 않습니다. 세션 ID는 `호스트:도구:이름`입니다(예: `gpu-server-1:claude:project-head`, 로컬 PC는 `local:claude:main`).
 - 보낸 세션은 기다리지 않고 하던 일을 계속합니다. 회신은 나중에 도착합니다.
 - **받는 쪽:** 세션이 열려 있으면 그 세션에 바로 들어갑니다.
-  - Claude: `claude --dangerously-load-development-channels server:agent-link`로 시작한 세션이어야 합니다. 플래그 없이 연 세션에서 `/agent-link:register`를 쓰면, 그 세션을 나간 뒤 실행할 명령을 알려 줍니다. 세션 폴더로 이동해 원래 플래그를 그대로 두고 채널 플래그를 더해 `--resume <세션 이름>`으로 다시 엽니다(예: `cd /home/me && claude --dangerously-load-development-channels server:agent-link --resume project-head`).
+  - Claude: 채널 플래그로 연 세션이어야 합니다. 가장 쉬운 방법은 `agent-link --resume <세션 이름>`입니다. `/rename`한 이름(또는 세션 ID)으로 세션을 찾아 그 폴더에서 플래그를 붙여 다시 엽니다. 이름 없이 `agent-link --resume`은 고르기 화면, `agent-link --continue`는 지금 폴더의 가장 최근 대화입니다. claude에 넘길 인자는 `--` 뒤에 씁니다(`agent-link --resume project-head -- --model opus`). 새 세션은 `claude --dangerously-load-development-channels server:agent-link`로 엽니다. 플래그 없이 연 세션에서 `/agent-link:register`를 쓰면 다시 열 명령을 알려 줍니다.
   - Codex: 스레드 ID 또는 `/rename` 이름으로 등록한 세션이어야 합니다(`codex queue`).
 - 바로 넣을 수 없으면 박스에 저장합니다. 세션이 닫혀 있거나, push가 안 되는 세션이거나, push가 실패한 경우입니다.
   - 플래그 없이 연 Claude 세션은 등록할 때(또는 첫 `/agent-link`) 박스 감시를 백그라운드로 겁니다(`agent-link wait-box`). 메시지가 박스에 들어오면 몇 초 안에 세션이 깨어나 읽습니다. 세션이 열려 있는 동안만 동작합니다. `/agent-link:settings watch off`로 끄면 그 이름에는 다시 걸지 않고, `watch on`으로 다시 켭니다.

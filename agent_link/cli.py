@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import secrets
 import shlex
+import shutil
 import signal
 import socket
 import subprocess
@@ -442,7 +443,13 @@ def readable(info):
 def build_parser():
     parser = argparse.ArgumentParser(prog='agent-link', description='agent-link: the hub on the local PC (agent-link hub ...) '
                                      'and the daemon on each server')
-    commands = parser.add_subparsers(dest='command', required=True)
+    opening = parser.add_mutually_exclusive_group()
+    opening.add_argument('--resume', nargs='?', const='', metavar='SESSION',
+                         help='Open a Claude session with live agent-link messages: its /rename name or session ID '
+                              '(no value: pick one). Arguments after -- go to claude.')
+    opening.add_argument('--continue', dest='continue_', action='store_true',
+                         help="Same, for this folder's most recent Claude conversation")
+    commands = parser.add_subparsers(dest='command')
     status = commands.add_parser('status', help='Connection status: the hub and its servers on the PC, the daemon on a server')
     status.add_argument('--socket', type=Path)
     status.add_argument('--json', action='store_true', help='Everything the hub or daemon reports, as JSON')
@@ -552,8 +559,54 @@ def show_status(socket_path, as_json=False):
     return 0
 
 
+CHANNEL = ['--dangerously-load-development-channels', 'server:agent-link']
+
+
+def open_claude(resume=None, continue_=False, extra=()):
+    """Run claude with the agent-link channel, resuming a session by name or ID, picking one, or continuing."""
+    from .inject import claude_channel_policy
+    from .sessions import find_claude_sessions
+    if not shutil.which('claude'):
+        raise SystemExit('claude (Claude Code) is not on PATH')
+    extra = list(extra)
+    if continue_:
+        argv = ['claude', *CHANNEL, '--continue', *extra]
+    elif not resume:
+        argv = ['claude', *CHANNEL, '--resume', *extra]
+    else:
+        found = find_claude_sessions(resume)
+        if not found:
+            raise SystemExit(f'No Claude session named "{resume}" (the name given with /rename, or a session ID). '
+                             'Run `agent-link --resume` to pick one.')
+        session = found[0]
+        for other in found[1:]:
+            print(f'agent-link: also named "{resume}": {other["id"]} in {other["cwd"] or "?"}; '
+                  f'opening the most recent one', file=sys.stderr)
+        if session['cwd'] and os.path.isdir(session['cwd']):
+            os.chdir(session['cwd'])  # claude --resume only finds sessions of the folder it starts in
+        argv = ['claude', *CHANNEL, '--resume', session['id'], *extra]
+    blocked = claude_channel_policy()
+    if blocked:
+        print(f'agent-link: note: {blocked}', file=sys.stderr)
+    print(f'agent-link: {shlex.join(argv)}  (in {os.getcwd()})', file=sys.stderr, flush=True)
+    os.execvp('claude', argv)
+
+
 def agent_link(argv=None):
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    argv = list(sys.argv[1:] if argv is None else argv)
+    passthrough = []
+    if '--' in argv:  # everything after -- belongs to claude
+        argv, passthrough = argv[:argv.index('--')], argv[argv.index('--') + 1:]
+    args = parser.parse_args(argv)
+    if args.resume is not None or args.continue_:
+        if args.command:
+            parser.error('--resume/--continue cannot be combined with a subcommand')
+        return open_claude(args.resume, args.continue_, passthrough)
+    if passthrough:
+        parser.error('arguments after -- are only for --resume/--continue')
+    if not args.command:
+        parser.error('choose a command (e.g. status, up, hub ...) or --resume SESSION')
     if args.command == 'status':
         return show_status(args.socket or default_socket(), args.json)
     if args.command == 'hub':

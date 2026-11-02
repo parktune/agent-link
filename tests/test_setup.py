@@ -184,3 +184,62 @@ class StaleAgentTests(unittest.TestCase):
             self.assertEqual(list(spoke.agents), ['gpu-server-1:claude:head'])
             self.assertEqual([a['id'] for a in store.known_agents()], ['gpu-server-1:claude:head'])
             store.db.close()
+
+
+class ResumeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.bin = self.root / 'bin'
+        self.bin.mkdir()
+        fake = self.bin / 'claude'
+        fake.write_text(f'#!{sys.executable}\nimport json, os, sys\n'
+                        f'json.dump({{"argv": sys.argv[1:], "cwd": os.getcwd()}}, open({str(self.root / "ran.json")!r}, "w"))\n')
+        fake.chmod(0o755)
+        self.work = self.root / 'project'
+        self.work.mkdir()
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def transcript(self, session_id, title, cwd):
+        path = self.root / 'claude/projects/-p' / f'{session_id}.jsonl'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lines = [{'type': 'user', 'cwd': str(cwd), 'message': 'hi'}]
+        if title:
+            lines.append({'type': 'custom-title', 'customTitle': title, 'sessionId': session_id})
+        path.write_text(''.join(json.dumps(line) + '\n' for line in lines))
+        return path
+
+    def run_cli(self, *argv):
+        env = {**os.environ, 'PATH': f'{self.bin}:{os.environ["PATH"]}', 'CLAUDE_CONFIG_DIR': str(self.root / 'claude')}
+        result = subprocess.run([sys.executable, '-m', 'agent_link', *argv], env=env, capture_output=True, text=True,
+                                timeout=30, cwd=self.root)
+        ran = json.loads((self.root / 'ran.json').read_text()) if (self.root / 'ran.json').exists() else None
+        return result, ran
+
+    def test_resume_by_name_opens_the_session_in_its_folder_with_the_channel(self):
+        sid = '11111111-2222-3333-4444-555555555555'
+        self.transcript(sid, 'project-head', self.work)
+        result, ran = self.run_cli('--resume', 'project-head', '--', '--model', 'opus')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(ran['argv'], ['--dangerously-load-development-channels', 'server:agent-link',
+                                       '--resume', sid, '--model', 'opus'])
+        self.assertEqual(ran['cwd'], str(self.work))
+
+    def test_resume_by_id_without_a_name_and_the_picker(self):
+        sid = '66666666-7777-8888-9999-000000000000'
+        self.transcript(sid, None, self.work)
+        _, ran = self.run_cli('--resume', sid)
+        self.assertEqual(ran['argv'][-2:], ['--resume', sid])
+        _, ran = self.run_cli('--resume')
+        self.assertEqual(ran['argv'], ['--dangerously-load-development-channels', 'server:agent-link', '--resume'])
+        _, ran = self.run_cli('--continue')
+        self.assertEqual(ran['argv'][-1], '--continue')
+
+    def test_unknown_name_and_mixing_with_subcommands_are_errors(self):
+        result, ran = self.run_cli('--resume', 'nobody')
+        self.assertEqual((result.returncode, ran), (1, None))
+        self.assertIn('No Claude session named "nobody"', result.stderr)
+        result, _ = self.run_cli('--resume', 'x', 'status')
+        self.assertNotEqual(result.returncode, 0)

@@ -333,9 +333,10 @@ class SessionNameTests(Environment):
             self.assertEqual((await adapter.call('register', {'name': 'custom'}))['id'], 'gpu1:claude:custom')
             restart = adapter.whoami()['restart']
             self.assertEqual(restart['resume'], 'project-head')  # the session name, not the agent name
-            self.assertRegex(restart['command'], r'^cd \S+ && claude --dangerously-load-development-channels '
-                                                 r'server:agent-link .*--resume project-head$')
-            self.assertTrue(restart['by_id'].endswith(f'--resume {sid}'))
+            self.assertEqual(restart['command'], 'agent-link --resume project-head')
+            self.assertEqual(restart['by_id'], f'agent-link --resume {sid}')
+            self.assertRegex(restart['full'], r'^cd \S+ && claude --dangerously-load-development-channels '
+                                              r'server:agent-link .*--resume project-head$')
             adapter.channel = True
             self.assertNotIn('restart', adapter.whoami())  # already live
         finally:

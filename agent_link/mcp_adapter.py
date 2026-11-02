@@ -124,17 +124,20 @@ class Adapter:
                 'command': shlex.join([sys.executable, '-m', 'agent_link', 'wait-box', '--box', box])}
 
     def restart(self, name=None):
-        """How to reopen this Claude session with push: exit it, then run `command` (resume by session name).
+        """How to reopen this Claude session with push: exit it, then run `command`.
 
-        `by_id` resumes by session ID, for when the name is missing or matches more than one session.
+        `command` is `agent-link --resume <session name>` (it finds the folder and adds the channel flag);
+        `by_id` uses the session ID instead; `full` is the plain claude command that also keeps the flags
+        this session was started with.
         """
         if self.tool != 'claude' or self.channel or self.channel_blocked or not self.session_id:
             return None  # reopening with the flag cannot help while the organization keeps Channels off
         launch, cwd = claude_launch_args(), shlex.quote(os.getcwd())
-        by_id = f'cd {cwd} && {shlex.join(claude_restart_argv(self.session_id, launch))}'
         name = name or self.session_name()
-        command = f'cd {cwd} && {shlex.join(claude_restart_argv(name, launch))}' if name else by_id
-        return {'command': command, 'by_id': by_id, 'resume': name or self.session_id}
+        resume = name or self.session_id
+        return {'command': shlex.join(['agent-link', '--resume', resume]),
+                'by_id': shlex.join(['agent-link', '--resume', self.session_id]),
+                'full': f'cd {cwd} && {shlex.join(claude_restart_argv(resume, launch))}', 'resume': resume}
 
     def whoami(self):
         name = self.session_name()

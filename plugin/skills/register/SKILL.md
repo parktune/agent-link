@@ -36,8 +36,8 @@ Tell the user the ID and mailbox folder in one or two lines. Then:
 - **Claude, `push.available` false because the organization has not enabled Channels** (`push.reason` says so and there is no `restart`): messages go to the mailbox and the watch from step 4 wakes this session. Reopening with the flag would not help: Claude Code drops channel events until an administrator sets `channelsEnabled: true` in the organization's managed settings. Say that in one or two lines; show no restart command.
 - **Claude, `push.available` false:** messages go to the mailbox; the watch from step 4 wakes this session meanwhile, a few seconds late. To receive them live, show `restart.command` from the result exactly, in a code block, with these steps:
   1. Leave this session (`/exit` or Ctrl+C twice). A copy would start if it were still open.
-  2. Run the command in a terminal. It goes to this session's folder, adds `--dangerously-load-development-channels server:agent-link`, keeps the other flags this session was started with, and resumes the session by its name (`restart.resume`).
+  2. Run the command in a terminal: `agent-link --resume <session name>`. It finds this session, goes to its folder and reopens it with `--dangerously-load-development-channels server:agent-link`.
   3. The reopened session keeps its registration; `/agent-link:settings` shows `push.available` true.
 
-  If there is no `session_name`, `restart.command` already resumes by session ID. Otherwise add `restart.by_id` as the fallback for when the name matches more than one session. Do not run either command yourself.
+  If there is no `session_name`, `restart.command` already resumes by session ID. Otherwise add `restart.by_id` as the fallback for when the name matches more than one session. If this session was started with other claude flags (a model, permissions), mention that they can be added after `--` (`agent-link --resume <name> -- --model …`) or that `restart.full` keeps them all. Do not run any of these commands yourself.
 - **Codex:** with a thread (`push.available` true) messages are queued into this session (`codex queue`); without one they go to the mailbox.
