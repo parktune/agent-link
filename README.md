@@ -44,11 +44,14 @@ git clone https://github.com/parktune/agent-link.git ~/work/agent-link && ~/work
 
 업데이트할 때는 `git pull` 후 다시 실행합니다.
 
-**2. 로컬 PC에서** `~/.ssh/config`의 alias로 서버를 연결합니다.
+**2. 로컬 PC에서** 서버를 연결합니다. 고르는 방식과 직접 지정하는 방식이 있습니다.
 
 ```bash
-hubctl add-host gpu-230
+hubctl discover           # ~/.ssh/config 호스트 목록에서 Space로 고르고 Enter로 확정
+hubctl add-host gpu-230   # 또는 alias를 직접 지정
 ```
+
+`discover`는 이미 등록된 서버를 `[=] (등록됨)`으로 표시합니다. 확정하면 고른 서버마다 아래 `add-host` 과정을 차례로 실행하고 결과를 요약합니다. 터미널이 아닌 곳에서는 `--hosts gpu-230,gpu-vlm`으로 지정합니다.
 
 이 한 줄이 SSH로 서버에 들어가 다음을 모두 처리합니다.
 - `agent-hub`를 찾습니다(`~/work/agent-link`, `~/agent-link`, PATH 순).

@@ -194,6 +194,49 @@ async def add_host(args, store):
         + authorized_keys_line(options, remote_path, args.remote_socket))
 
 
+def add_host_args(alias, ssh_config=None):
+    return argparse.Namespace(alias=alias, name=None, remote_path=None, remote_socket=None, admin_alias=None,
+                              code=False, mode='stream', ssh_config=ssh_config)
+
+
+def discover_hosts(args, store):
+    from .discover import pick, ssh_hosts
+    hosts = ssh_hosts(args.ssh_config)
+    registered = {record['alias'] for record in store.hosts()}
+    if args.hosts:
+        known = {h['alias'] for h in hosts}
+        chosen = [a.strip() for a in args.hosts.split(',') if a.strip()]
+        unknown = [a for a in chosen if a not in known]
+        if unknown:
+            raise SystemExit(f'not in SSH config: {", ".join(unknown)}')
+        chosen = [a for a in chosen if a not in registered]
+    else:
+        if not hosts:
+            raise SystemExit('No Host entries found in ' + (args.ssh_config or '~/.ssh/config'))
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            raise SystemExit('discover needs a terminal; use --hosts alias1,alias2 instead')
+        chosen = pick(hosts, registered)
+        if chosen is None:
+            say('Cancelled. Nothing was changed.')
+            return 0
+    if not chosen:
+        say('No new servers selected.')
+        return 0
+    results = {}
+    for alias in chosen:
+        say(f'\n=== {alias} ===')
+        try:
+            asyncio.run(add_host(add_host_args(alias, args.ssh_config), store))
+            results[alias] = 'connected'
+        except SystemExit as error:
+            say(f'failed: {error}')
+            results[alias] = f'failed: {str(error).splitlines()[0]}'
+    say('\nSummary:')
+    for alias, outcome in results.items():
+        say(f'  {alias}: {outcome}')
+    return 0 if all(v == 'connected' for v in results.values()) else 1
+
+
 def hubctl(argv=None):
     parser = argparse.ArgumentParser(prog='hubctl', description='agent-link hub on the local PC')
     commands = parser.add_subparsers(dest='command', required=True)
@@ -209,6 +252,9 @@ def hubctl(argv=None):
     add.add_argument('--code', action='store_true', help='Enter an invitation code by hand instead')
     add.add_argument('--mode', choices=['stream', 'poll'], default='stream')
     add.add_argument('--ssh-config')
+    discover = commands.add_parser('discover', help='Pick servers from ~/.ssh/config (Space to pick, Enter to apply)')
+    discover.add_argument('--ssh-config', help='SSH config to read (default ~/.ssh/config)')
+    discover.add_argument('--hosts', help='Comma-separated aliases instead of the interactive picker')
     commands.add_parser('remove-host').add_argument('host')
     commands.add_parser('hosts').add_argument('--pid', action='store_true', help='Print only the hub process ID')
     agents = commands.add_parser('agents')
@@ -233,6 +279,8 @@ def hubctl(argv=None):
     store = HubStore(root / 'hub.sqlite3')
     if args.command == 'add-host':
         asyncio.run(add_host(args, store))
+    elif args.command == 'discover':
+        return discover_hosts(args, store)
     elif args.command == 'remove-host':
         if not store.remove_host(args.host):
             raise SystemExit(f'unknown host {args.host}')

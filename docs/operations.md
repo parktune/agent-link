@@ -15,7 +15,11 @@ git clone https://github.com/parktune/agent-link.git ~/work/agent-link && ~/work
 3. `scripts/install.py --replace`로 `~/.claude/skills`, `~/.codex/skills`에 스킬을, `claude mcp add --scope user`·`codex mcp add`로 MCP 서버를 등록한다.
 4. `~/.local/bin`에 `hubctl`, `agent-hub`를 링크한다.
 
-## 2. 서버 연결 (`hubctl add-host <alias>`)
+## 2. 서버 연결 (`hubctl discover` 또는 `hubctl add-host <alias>`)
+
+`hubctl discover`는 `~/.ssh/config`의 `Host` 항목을 체크리스트로 보여 준다. `Include`된 파일도 읽고, `*`·`?`·`!` 패턴과 `Match` 블록은 제외한다.
+↑↓(j/k)로 이동하고 Space로 고르고 Enter로 확정한다. `q`는 아무것도 바꾸지 않고 끝낸다.
+이미 등록된 서버는 고를 수 없다. 확정하면 고른 서버마다 아래 `add-host`를 실행하고 결과를 요약한다. 터미널이 없으면 `--hosts a,b`로 지정한다.
 
 사전 조건은 다음과 같다. agent-link가 대신 만들지 않는다.
 - `~/.ssh/config`에 alias가 있다(ProxyJump 포함 가능).
