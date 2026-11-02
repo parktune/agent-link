@@ -9,3 +9,7 @@ dist/
 !.env.example
 .runtime/
 *.log
+
+# Mailboxes (4.2 boxes): local PC and server
+/hub/
+/spoke/

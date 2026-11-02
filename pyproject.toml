@@ -4,19 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-link"
-version = "0.3.0"
-description = "Feasibility-first bridge for independent Codex conversations"
+version = "0.4.0"
+description = "Hub-and-spoke messaging between Claude Code and Codex sessions on many servers"
 requires-python = ">=3.11"
 license = "Apache-2.0"
-
-[project.optional-dependencies]
-security = ["mcp>=1.20,<2"]
-diagnostics = ["websockets>=15,<17"]
+dependencies = ["mcp>=1.20,<2"]
 
 [project.scripts]
-agent-link = "codex_bridge.__main__:main"
-# Compatibility for existing installations and SSH configurations.
-codex-bridge = "codex_bridge.__main__:main"
+hubctl = "agent_link.cli:hubctl_main"
+agent-hub = "agent_link.cli:agent_hub_main"
+agent-link-mcp = "agent_link.mcp_adapter:main"
 
 [tool.setuptools.packages.find]
-include = ["codex_bridge*"]
+include = ["agent_link*"]

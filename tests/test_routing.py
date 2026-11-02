@@ -1,0 +1,266 @@
+"""Scenarios from spec chapter 14 that run without models."""
+import asyncio
+import json
+
+from agent_link.protocol import PROTOCOL_VERSION, encode, read_frame
+from agent_link.spoke import INVITE_ATTEMPTS
+from tests.support import Environment, until
+
+
+class SameHostTests(Environment):
+    async def test_s2_s10_same_host_delivery_skips_the_hub_and_works_without_it(self):
+        await self.server('gpu1', allow_origination='host')
+        a = await self.session('gpu1', 'claude', 'alpha')
+        b = await self.session('gpu1', 'claude', 'beta')
+        c = await self.session('gpu1', 'claude', 'gamma')
+        result = await a.send('beta', 'hello beta')
+        self.assertEqual((result['status'], result['route']), ('delivered', 'local'))
+        self.assertEqual([m['content'] for m in b.received], ['hello beta'])
+        self.assertEqual(c.received, [])  # S2: only the addressed session
+        self.assertEqual(b.received[0]['to'], 'gpu1:claude:beta')
+
+    async def test_s12_explicit_own_host_missing_and_ambiguous_names_are_not_sent_up(self):
+        await self.server('gpu1', allow_origination='all')
+        a = await self.session('gpu1', 'claude', 'alpha')
+        await self.session('gpu1', 'claude', 'head')
+        await self.session('gpu1', 'codex', 'head')
+        with self.assertRaisesRegex(Exception, 'not_found'):
+            await a.send('gpu1:claude:ghost', 'x')
+        with self.assertRaisesRegex(Exception, 'ambiguous'):
+            await a.send('head', 'x')
+        self.assertEqual((await a.send('codex:head', 'x'))['route'], 'local')
+        self.assertEqual(self.spokes['gpu1'].store.outbox_stats()['items'], 1)  # only the mirrored metadata
+
+    async def test_s13_mirror_reports_metadata_without_body(self):
+        await self.server('gpu1', allow_origination='host')
+        a = await self.session('gpu1', 'claude', 'alpha')
+        await self.session('gpu1', 'claude', 'beta')
+        await a.send('beta', 'secret body')
+        entries = self.spokes['gpu1'].store.outbox_after(0)
+        self.assertEqual(len(entries), 1)
+        self.assertNotIn('secret body', json.dumps(entries))
+        self.assertEqual(entries[0]['meta']['size'], len('secret body'))
+
+    async def test_default_policy_only_allows_replies(self):
+        await self.server('gpu1')
+        a = await self.session('gpu1', 'claude', 'alpha')
+        await self.session('gpu1', 'claude', 'beta')
+        with self.assertRaisesRegex(Exception, 'origination_denied'):
+            await a.send('beta', 'unsolicited')
+        with self.assertRaisesRegex(Exception, 'unauthorized'):
+            await a.send('beta', 'fake reply', 'reply', '01900000-0000-7000-8000-000000000000')
+
+
+class MailboxTests(Environment):
+    async def test_s5_s17_closed_box_only_and_failed_push_sessions_get_mailbox_files(self):
+        await self.server('gpu1', allow_origination='host')
+        a = await self.session('gpu1', 'claude', 'alpha')
+        boxed = await self.session('gpu1', 'codex', 'boxed', delivery='box')
+        failing = await self.session('gpu1', 'claude', 'failing', fail=True)
+        closed = await self.session('gpu1', 'claude', 'closed')
+        await closed.stop()
+        self.sessions.remove(closed)
+        await until(lambda: self.spokes['gpu1'].agents['gpu1:claude:closed'].conn is None)
+        self.assertEqual((await a.send('codex:boxed', 'b'))['status'], 'stored')
+        self.assertEqual((await a.send('failing', 'f'))['status'], 'stored')
+        self.assertEqual((await a.send('closed', 'c'))['status'], 'stored_offline')
+        files = sorted(p.relative_to(self.root / 'gpu1' / 'box').parts[0] for p in (self.root / 'gpu1' / 'box').rglob('*.md'))
+        self.assertEqual(files, ['claude-closed', 'claude-failing', 'codex-boxed'])
+        text = next((self.root / 'gpu1/box/codex-boxed/received').glob('*.md')).read_text()
+        self.assertIn('account: acct', text)
+        self.assertIn('from: gpu1:claude:alpha', text)
+        messages = await boxed.box()
+        self.assertEqual([m['content'] for m in messages], ['b'])
+        self.assertEqual(await boxed.box(), [])  # moved to received/read/
+        self.assertTrue(list((self.root / 'gpu1/box/codex-boxed/received/read').glob('*.md')))
+
+    async def test_registry_survives_daemon_restart_so_mail_still_arrives(self):
+        spoke = await self.server('gpu1', allow_origination='host')
+        await self.session('gpu1', 'claude', 'beta')
+        for session in self.sessions:
+            await session.stop()
+        self.sessions.clear()
+        await spoke.close()
+        self.spokes.pop('gpu1')
+        await self.server('gpu1', allow_origination='host')
+        a = await self.session('gpu1', 'claude', 'alpha')
+        self.assertEqual((await a.send('beta', 'later'))['status'], 'stored_offline')
+        found = self.spokes['gpu1'].store.agent_for_session('session-beta')
+        self.assertEqual(found['name'], 'beta')
+
+
+class HubTests(Environment):
+    async def two_hosts(self, **config):
+        await self.server('gpu1', **config)
+        await self.server('gpu2', **config)
+        self.enroll('gpu1')
+        self.enroll('gpu2')
+        await self.start_hub()
+
+    async def test_s1_round_trip_local_to_server_and_reply_back(self):
+        await self.two_hosts()
+        main = await self.session('local', 'claude', 'main')
+        head = await self.session('gpu1', 'claude', 'project-head')
+        await self.connected('gpu1')
+        listed = {a['id'] for a in self.hub.list_agents()}
+        self.assertTrue({'local:claude:main', 'gpu1:claude:project-head'} <= listed)
+        sent = await main.send('gpu1:claude:project-head', '현황 보고 부탁해')
+        self.assertEqual((sent['status'], sent['route']), ('delivered', 'hub'))
+        request = head.received[0]
+        self.assertEqual(request['from'], 'local:claude:main')
+        reply = await head.send(request['from'], '보고: 정상', 'reply', request['id'])
+        self.assertEqual(reply['status'], 'delivered')
+        await until(lambda: main.received)
+        self.assertEqual((main.received[0]['content'], main.received[0]['in_reply_to'], main.received[0]['hops']),
+                         ('보고: 정상', request['id'], 1))
+        self.assertEqual([m['status'] for m in self.hub.store.recent()], ['delivered', 'delivered'])
+        self.assertNotIn('content', self.hub.store.recent()[0])
+
+    async def test_s9_reply_to_reply_is_refused(self):
+        await self.two_hosts()
+        main = await self.session('local', 'claude', 'main')
+        head = await self.session('gpu1', 'claude', 'head')
+        await self.connected('gpu1')
+        await main.send('gpu1:claude:head', 'q')
+        await head.send('local:claude:main', 'a', 'reply', head.received[0]['id'])
+        await until(lambda: main.received)
+        for type in ('reply', 'request'):
+            with self.assertRaisesRegex(Exception, 'reply_to_reply'):
+                await main.send('gpu1:claude:head', 'thanks', type, main.received[0]['id'])
+
+    async def test_s9_hop_limit_on_request_chains(self):
+        await self.two_hosts(max_hops=1, allow_origination='all')
+        main = await self.session('local', 'claude', 'main')
+        head = await self.session('gpu1', 'claude', 'head')
+        await self.connected('gpu1')
+        await main.send('gpu1:claude:head', 'q')
+        follow = await head.send('local:claude:main', 'sub-question', 'request', head.received[0]['id'])
+        self.assertEqual(follow['status'], 'delivered')
+        await until(lambda: main.received)
+        self.assertEqual(main.received[0]['hops'], 1)
+        with self.assertRaisesRegex(Exception, 'hops_exceeded'):
+            await main.send('gpu1:claude:head', 'deeper', 'request', main.received[0]['id'])
+
+    async def test_s11_omitted_host_goes_up_to_the_hub(self):
+        await self.two_hosts(allow_origination='all')
+        a = await self.session('gpu1', 'claude', 'alpha')
+        trainer = await self.session('gpu2', 'codex', 'trainer')
+        await self.connected('gpu1')
+        await self.connected('gpu2')
+        result = await a.send('trainer', 'start')
+        self.assertEqual(result['route'], 'hub')
+        await until(lambda: trainer.received)
+        self.assertEqual(trainer.received[0]['to'], 'gpu2:codex:trainer')
+
+    async def test_unknown_session_on_remote_host_is_not_found(self):
+        await self.two_hosts()
+        main = await self.session('local', 'claude', 'main')
+        await self.connected('gpu1')
+        with self.assertRaisesRegex(Exception, 'not_found'):
+            await main.send('gpu1:claude:nobody', 'x')
+
+    async def test_s6_one_unreachable_host_does_not_affect_others(self):
+        self.broken.add('gpu1')
+        await self.two_hosts()
+        main = await self.session('local', 'claude', 'main')
+        worker = await self.session('gpu2', 'claude', 'worker')
+        await self.connected('gpu2')
+        self.assertEqual((await main.send('gpu2:claude:worker', 'ok?'))['status'], 'delivered')
+        self.assertFalse(self.hub.links['gpu1'].connected)
+        with self.assertRaisesRegex(Exception, 'not_found|offline'):
+            await main.send('gpu1:claude:head', 'x')
+        self.broken.discard('gpu1')
+        self.hub.links['gpu1'].transport = self.transport({'name': 'gpu1'})
+        await until(lambda: self.hub.links['gpu1'].connected, timeout=15)
+        self.assertEqual(worker.received[0]['content'], 'ok?')
+
+    async def test_s7_s16_hub_restart_resumes_outbox_without_duplicates(self):
+        await self.two_hosts()
+        main = await self.session('local', 'claude', 'main')
+        head = await self.session('gpu1', 'claude', 'head')
+        await self.connected('gpu1')
+        await main.send('gpu1:claude:head', 'q')
+        request = head.received[0]
+        await main.stop()
+        self.sessions.remove(main)
+        await self.stop_hub()
+        queued = await head.send('local:claude:main', 'answer while hub is down', 'reply', request['id'])
+        self.assertEqual(queued['status'], 'queued')
+        await self.start_hub()
+        main = await self.session('local', 'claude', 'main')
+        await self.connected('gpu1')
+        await until(lambda: self.spokes['gpu1'].store.outbox_stats()['items'] == 0)
+        # The reply reached the hub after restart; main was online again, so it was pushed once.
+        self.assertEqual(self.hub.store.message(queued['id'])['status'], 'delivered')
+        self.assertEqual([m['content'] for m in main.received], ['answer while hub is down'])
+        # Replaying the same outbox entry (e.g. lost ack) is acknowledged without a second delivery.
+        ack = await self.hub.handle_outbox('gpu1', {'op': 'outbox', 'seq': 1, 'msg': {}})
+        self.assertEqual(ack, {'op': 'ack', 'seq': 1})
+        self.assertEqual(len(main.received), 1)
+
+    async def test_poll_mode_exchange(self):
+        await self.server('gpu1')
+        self.enroll('gpu1', mode='poll')
+        await self.start_hub()
+        main = await self.session('local', 'claude', 'main')
+        head = await self.session('gpu1', 'claude', 'head')
+        await until(lambda: any(a['status'] == 'online' for a in self.hub.presence.get('gpu1', [])), timeout=20)
+        self.assertEqual((await main.send('gpu1:claude:head', 'poll q'))['status'], 'delivered')
+        reply = await head.send('local:claude:main', 'poll a', 'reply', head.received[0]['id'])
+        self.assertEqual(reply['status'], 'queued')  # picked up by the next exchange
+        await until(lambda: main.received, timeout=20)
+        self.assertEqual(main.received[0]['content'], 'poll a')
+
+
+class EndpointSecurityTests(Environment):
+    async def endpoint(self, frames):
+        process = await asyncio.create_subprocess_exec(
+            __import__('sys').executable, '-m', 'agent_link', 'agent-hub', 'endpoint', '--socket',
+            str(self.root / 'gpu1' / 's.sock'), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+        for frame in frames:
+            process.stdin.write(encode(frame))
+        await process.stdin.drain()
+        replies = [await asyncio.wait_for(read_frame(process.stdout), 10)]
+        process.stdin.close()
+        await process.wait()
+        return replies[0]
+
+    async def test_s15_tokens_revocation_and_allowlist(self):
+        spoke = await self.server('gpu1')
+        token = self.enroll('gpu1')
+        hello = {'op': 'hello', 'v': PROTOCOL_VERSION}
+        self.assertEqual((await self.endpoint([hello]))['code'], 'unauthorized')
+        self.assertEqual((await self.endpoint([{**hello, 'token': 'x' * 43}]))['code'], 'unauthorized')
+        self.assertEqual((await self.endpoint([{**hello, 'token': token}]))['op'], 'hello_ok')
+        self.assertEqual((await self.endpoint([{'op': 'register', 'tool': 'claude', 'name': 'x'}]))['code'], 'unauthorized')
+        self.assertEqual((await self.endpoint([{'op': 'deliver', 'msg': {}}]))['code'], 'unauthorized')
+        spoke.store.revoke()
+        self.assertEqual((await self.endpoint([{**hello, 'token': token}]))['code'], 'unauthorized')
+
+    async def test_s15_shell_like_frames_are_rejected_after_hello(self):
+        await self.server('gpu1')
+        token = self.enroll('gpu1')
+        process = await asyncio.create_subprocess_exec(
+            __import__('sys').executable, '-m', 'agent_link', 'agent-hub', 'endpoint', '--socket',
+            str(self.root / 'gpu1' / 's.sock'), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+        process.stdin.write(encode({'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token}))
+        process.stdin.write(encode({'op': 'exec', 'command': 'id'}))
+        await process.stdin.drain()
+        frames = []
+        while (frame := await asyncio.wait_for(read_frame(process.stdout), 10)) is not None:
+            frames.append(frame['op'] if frame['op'] != 'error' else frame['code'])
+        await process.wait()
+        self.assertIn('unauthorized', frames)  # hello_ok may or may not arrive before the endpoint closes
+
+    async def test_s14_invitation_expiry_and_attempt_limit(self):
+        spoke = await self.server('gpu1')
+        code, _ = spoke.store.invite(now=0)
+        with self.assertRaisesRegex(Exception, 'expired'):
+            spoke.store.enroll(code, 'x' * 43)
+        code, _ = spoke.store.invite()
+        for _ in range(INVITE_ATTEMPTS):
+            with self.assertRaisesRegex(Exception, 'rejected'):
+                spoke.store.enroll('AAAA-AAAA-AAAA-AAAA', 'x' * 43)
+        with self.assertRaisesRegex(Exception, 'closed'):
+            spoke.store.enroll(code, 'x' * 43)
+        self.assertFalse(spoke.store.check_token('x' * 43))

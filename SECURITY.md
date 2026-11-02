@@ -1,83 +1,55 @@
 # Security boundaries
 
-## Security mode (SSH)
+This is a new, independently unaudited implementation. Pilot it with non-sensitive data.
 
-Current support is Ubuntu to Ubuntu; Windows support is deferred.
-This mode uses an existing, administrator-approved OpenSSH route. It creates no
-public listener, VPN, cloud relay or network discovery service. Host key checking
-and noninteractive public-key authentication are mandatory; unknown host keys are
-not accepted automatically. Agent/port forwarding, LocalCommand and preexisting
-multiplexed sessions are disabled for these exchanges. SSH config (including any
-ProxyJump/ProxyCommand), keys, endpoint executable and profiles are trusted local
-configuration. They must be managed under the organization's policy.
+## Network
 
-An additional 80-bit one-use enrollment code expires after 5 minutes and closes
-after 5 failed claims. Codes travel only in encrypted SSH stdin, not argv or env.
-The remote profile persists a code hash, then a hash of the issued 256-bit token.
-The initiator stores that token in its private local DB. Public peer listings,
-audit metadata and transport errors exclude tokens and remote message bodies.
+- Servers open no listening port besides sshd. The spoke daemon binds a unix socket only
+  (mode 0600 by default; optionally a group, see `socket_group`).
+- All connections start at the hub on the user's PC and use the system OpenSSH client with
+  `BatchMode=yes`, `StrictHostKeyChecking=yes`, no agent/port forwarding, no LocalCommand.
+  Unknown host keys, authentication failures and wrong remote paths stop with an explanation;
+  nothing is bypassed or accepted automatically. agent-link never edits `sshd_config`,
+  `authorized_keys`, known_hosts or firewalls; `add-host` prints the forced-command line instead.
 
-The SSH account is itself an OS trust boundary. A normal shell-enabled SSH key
-can run commands outside this bridge. To restrict a dedicated credential to the
-mailbox, an administrator can deploy a forced command/restricted key and a
-dedicated OS account; the bridge does not alter system sshd/authorized_keys or
-firewall configuration. No claim of SSH-account sandboxing is made.
+## Host enrollment and tokens
 
-The bridge endpoint accepts only identity lookup, enrollment, and bounded mailbox
-exchange. It cannot execute remote commands, read arbitrary files, start Codex
-turns, change peer routes or approve tools. Messages are bound to authenticated
-peer IDs and validated against task ownership and terminal state transitions.
-SQLite transactions, stable message UUIDs, acknowledgments and retained tombstones
-support retries after lost responses without re-inserting messages. This is not a
-guarantee of exactly-once execution of a model's downstream actions.
+- `add-host` issues a 5-minute, one-use invitation on the server (80-bit code, hash stored, closed
+  after 5 wrong attempts) and consumes it immediately over SSH. The code travels only over SSH
+  pipes and stays in memory; it is never printed, logged, or put in argv, environment or files.
+  The manual `--code` path reads it from a hidden prompt.
+- The hub generates a 256-bit peer token per host. Servers store only its SHA-256 hash; the hub
+  keeps it in its 0600 SQLite database under a 0700 directory. Every endpoint session starts
+  with `hello` and is rejected `unauthorized` without a valid token. `agent-hub revoke` deletes
+  the hashes and drops the current hub connection; `hubctl remove-host` deletes the hub side.
+- Per-agent tokens and permissions are out of MVP scope: any process that can open the local
+  daemon socket can register as a session on that host.
 
-MCP returns remote text as untrusted tool output in the existing conversation.
-Session wake-up is opt-in per local session: only sessions registered with
-`security session add <name>` are woken, and only by `security watch` running
-as the same OS user. It queues a fenced envelope into that session with the
-official `codex queue` command, so the remote text does arrive as a user-turn
-message of that conversation. The envelope labels it untrusted remote data,
-but a label is not a permission boundary: a registered session should run with
-a sandbox/approval policy you accept for remote peers. Remove a session with
-`security session remove <name>` to stop wake-ups. The text is passed as a
-`codex queue` argument and is briefly visible to other local accounts through
-the process list; do not register sessions on hosts shared with untrusted users.
-There is no built-in limit on how many times two sessions answer each other;
-stop the watcher or remove the session to end a runaway exchange.
-The receiving Codex retains its own sandbox/approval policy. The shipping MCP
-registration does not preapprove tools or weaken that policy. Review the data
-scope before sending requests or results. SSH-only A2A does not prevent cloud
-model inference from receiving data included in the model context.
+## SSH account
 
-The mailbox uses an owner-only directory: mode 0700 / DB 0600 on Unix; explicit
-current-user SID + SYSTEM ACL on Windows. It is not encrypted at rest. Local
-account compromise, administrators, backups and SQLite free pages are outside
-this boundary. Apply the company's disk encryption, retention and backup policy.
-A profile has a live mailbox cap; pruning removes eligible bodies but keeps
-UUID/hash/route tombstones. Local audit contains action, time and ID, not body.
-Bilateral revocation requires both profiles to revoke. SSH keys/sessions remain
-separately administered.
+The recommended setup is a dedicated OS account whose `authorized_keys` entry for the hub key is
+`restrict,command="<abs path>/agent-hub endpoint"`. The endpoint passes only the allowlisted frames
+(`hello`, `enroll`, `deliver`, `ack`, `exchange`, `ping`) and has no shell, file, session selection or
+turn-start operation. With an ordinary shell-enabled key the allowlist does not sandbox the
+account: the key itself grants a shell.
 
-This is a new implementation, not an independently audited enterprise product.
-The Windows candidate code is not a supported or validated rollout path.
-The current connect CLI accepts only POSIX targets. Use approved non-sensitive pilot data first.
+## Messages
 
-## Comfort mode
+- Message content is untrusted input. Channel instructions and the skill tell sessions that it
+  grants no permissions and must not override the local user; the receiving session keeps its own
+  sandbox/approval policy. Labels are not a security boundary.
+- Loop limits: replies to a `reply` are rejected (`reply_to_reply`) and `hops` above the limit
+  (default 3) are rejected by both the sending spoke and the hub. Server sessions may by default
+  only reply to requests they received (`allow_origination = "none"`).
+- Codex push passes the message to `codex queue --message=...` as one argument; for that moment it
+  is visible to other local accounts through the process list. Do not use push on hosts shared with
+  untrusted users.
+- Mailbox files (`<repo>/hub`, `<repo>/spoke`) are 0600 in 0700 folders and git-ignored. They are
+  not encrypted at rest.
+- Hub and daemon logs record metadata (id, from, to, size, time, status), never bodies. Same-host
+  deliveries report metadata only to the hub (`mirror_local_metadata`).
+- Do not put secrets in message bodies: they reach model providers through the receiving session.
 
-The Tailscale mode is reserved but not implemented in this repository. Neither
-installing the security extra nor running security commands installs, logs in,
-starts or contacts Tailscale. The separate ssh-remote-tools repository has its
-own implementation and threat model; it is not a dependency of security mode.
+## Reporting
 
-## Legacy research and local demos
-
-The opt-in `cloud-*` commands are historical OpenAI relay diagnostics. They are
-not invoked by security mode. cloud-probe temporarily enables a separate host
-only after checking for an existing owner; it does not implement a relay client.
-Daemon status inspection has a read-only allowlist and does not touch threads.
-
-The original App Server demo uses read-only test threads and refuses server
-requests. Read-only is not secret isolation; use clean accounts/config for
-untrusted input. Do not commit runtime transcripts, credentials, Codex home files
-or pairing codes. `.runtime/` is ignored. Report issues privately to the owner or
-through a GitHub private security advisory, without sharing credentials.
+Report issues privately to the owner or through a GitHub private security advisory.
