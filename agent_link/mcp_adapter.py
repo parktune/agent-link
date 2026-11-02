@@ -90,7 +90,7 @@ class Adapter:
                 pass
             self.identity = None
             await asyncio.sleep(delay)
-            delay = min(delay * 2, 30)
+            delay = min(delay * 2, 5)  # a local socket: retry often so a restarted hub/daemon gets its sessions back fast
 
     async def _restore(self):
         launched = self.launch_register if self.launch_register not in ('', '1') else None

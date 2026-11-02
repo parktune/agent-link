@@ -511,9 +511,11 @@ def format_status(info):
         for host in hosts:
             if host.get('connected'):
                 lines.append(f'  {host["name"]:<{width}}  connected')
-            else:
-                why = host.get('last_error_detail') or host.get('last_error') or 'connecting'
+            elif host.get('last_error_detail') or host.get('last_error'):
+                why = host.get('last_error_detail') or host.get('last_error')
                 lines.append(f'  {host["name"]:<{width}}  disconnected ({why})')
+            else:
+                lines.append(f'  {host["name"]:<{width}}  connecting')
     else:
         lines.append(f'daemon   {info["host"]} (pid {info["pid"]})')
         hub = info.get('hub')
@@ -538,6 +540,35 @@ def format_status(info):
         for agent in sorted(agents, key=lambda a: (a.get('status') != 'online', a['id'])):
             lines.append(f'  {agent["id"]:<{width}}  {agent.get("status", "?"):<7}  {agent.get("delivery", "")}')
     return '\n'.join(lines)
+
+
+def online_ids(socket_path):
+    """IDs of the sessions online right now (empty if nothing answers)."""
+    try:
+        info = asyncio.run(ask(socket_path, 'status'))
+    except (SystemExit, ProtocolError):
+        return set()
+    return {a['id'] for a in info.get('agents') or [] if a.get('status') == 'online'}
+
+
+def settle(socket_path, expect=(), timeout=40):
+    """After a restart, wait until the servers have connected (or failed) and the sessions in `expect`
+    (online before the restart) are back. Each SSH link and each open session reconnects on its own,
+    which takes a few seconds; a status printed right away shows them all disconnected/offline."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            info = asyncio.run(ask(socket_path, 'status'))
+        except (SystemExit, ProtocolError):
+            info = {}
+        if info.get('role') == 'hub':
+            pending = any(not h.get('connected') and not h.get('last_error') for h in info.get('hosts') or [])
+        else:
+            pending = not info.get('hub_connected')
+        online = {a['id'] for a in info.get('agents') or [] if a.get('status') == 'online'}
+        if info and not pending and set(expect) <= online:
+            return
+        time.sleep(0.5)
 
 
 def show_status(socket_path, as_json=False):
@@ -636,15 +667,19 @@ def run_update(args):
     version = update_local(args.dry_run)
     if version:
         say(f'  installed {version}')
+    before = set()
     if role in ('hub', 'spoke'):
         say(f'[this machine] restart the {"hub" if role == "hub" else "daemon"} ...')
         if not args.dry_run:
             if service.alive():
+                before = online_ids(default_socket())
                 stop_running()
             store = spoke_store() if role == 'spoke' else None
             how = service.start(role, host_name=daemon_host_name(store) if store else None)
             say(f'  started ({how})')
     if not args.dry_run and role and service.alive():
+        say('waiting for servers and sessions to reconnect ...')
+        settle(default_socket(), before)
         say('')
         show_status(default_socket())
     failed = role == 'hub' and not args.local_only and any(str(v).startswith('failed') for v in results.values())
