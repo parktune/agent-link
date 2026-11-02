@@ -16,7 +16,7 @@
 | 미로드 시 동작 | 확인(문서) | 세션이 channel로 로드하지 않았거나 조직 정책이 막으면 **알림을 조용히 버리고 오류를 주지 않는다**. 그래서 어댑터는 상위 프로세스 명령행에서 플래그를 읽고, 없으면 박스 저장으로 전환한다 |
 | 조직 정책 | 확인(문서) | Team/Enterprise는 관리자가 `channelsEnabled`를 켜야 한다. 플래그는 allowlist만 우회하고 이 정책은 우회하지 않는다 |
 | `CLAUDE_CODE_SESSION_ID` | 미검증 | 바이너리에 문자열은 있다. stdio MCP 하위 프로세스에 주입되는지는 실제 세션에서 확인한다. 주입되면 세션 재시작 때 등록이 자동 복구되고, 없어도 기능에는 지장이 없다 |
-| MCP 환경변수 전달 | 설계로 우회 | 세션 이름을 환경변수(`AGENT_HUB_NAME`)로 넘기지 않는다. 첫 `/agent-link`나 `agent-link --resume` 때 등록하는 방식으로 바꿨다(ADR 0003) |
+| MCP 환경변수 전달 | 설계로 우회 | 세션 이름을 환경변수(`AGENT_HUB_NAME`)로 넘기지 않는다. 첫 `/agent-link`나 `agent-link claude|codex resume` 때 등록하는 방식으로 바꿨다(ADR 0003) |
 | 서버 이름과 플래그 | 미검증 | `claude mcp add --scope user agent-link`로 등록한 서버가 `server:agent-link`로 로드되는지 확인한다. 문서 예시는 `.mcp.json` 서버다 |
 
 ## Codex 수신 방식 (12장, 15장 1번)
@@ -50,7 +50,7 @@ push가 실패하거나 스레드를 모르면 박스에 저장한다. 이것이
 
 | 명세 | 구현 | 이유 |
 |---|---|---|
-| 세션 이름은 실행 래퍼(`agent-run`)로 지정 | 첫 `/agent-link`나 `agent-link --resume` 때 세션 이름으로 등록한다. 래퍼는 없다. 계정 라벨은 두지 않는다 | 사용자 결정(2026-11-02). MCP 하위 프로세스 환경변수 전달 문제도 함께 사라진다 |
+| 세션 이름은 실행 래퍼(`agent-run`)로 지정 | 첫 `/agent-link`나 `agent-link claude|codex resume` 때 세션 이름으로 등록한다. 래퍼는 없다. 계정 라벨은 두지 않는다 | 사용자 결정(2026-11-02). MCP 하위 프로세스 환경변수 전달 문제도 함께 사라진다 |
 | 오프라인 에이전트로 보내면 즉시 오류, 큐잉 없음 | 등록된 에이전트가 오프라인이거나 push가 안 되면 박스 폴더에 저장한다(`stored_offline`/`stored`). 호스트 자체에 연결할 수 없으면 오류다 | 사용자 결정. ADR 0003 |
 | pull 폴백은 inbox + `receive` 도구 | `<repo>/hub` 또는 `<repo>/spoke` 아래 에이전트별 `received/` 폴더의 Markdown 파일 + `check_box` 도구 | 사용자 결정 |
 | allowlist 프레임 | `ping`/`pong`(keepalive)을 추가했고, `ack`에 선택 필드 `result`를 둔다 | 장애 감지, 그리고 서버 세션에 라우팅 결과(오류 포함)를 돌려주기 위해서다 |

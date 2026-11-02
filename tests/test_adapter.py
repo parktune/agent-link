@@ -5,6 +5,7 @@ import shlex
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from unittest import mock
 from pathlib import Path
 
@@ -333,8 +334,8 @@ class SessionNameTests(Environment):
             self.assertEqual((await adapter.call('register', {'name': 'custom'}))['id'], 'gpu1:claude:custom')
             restart = adapter.whoami()['restart']
             self.assertEqual(restart['resume'], 'project-head')  # the session name, not the agent name
-            self.assertEqual(restart['command'], 'agent-link --resume project-head')
-            self.assertEqual(restart['by_id'], f'agent-link --resume {sid}')
+            self.assertEqual(restart['command'], 'agent-link claude resume project-head')
+            self.assertEqual(restart['by_id'], f'agent-link claude resume {sid}')
             self.assertRegex(restart['full'], r'^cd \S+ && claude --dangerously-load-development-channels '
                                               r'server:agent-link .*--resume project-head$')
             adapter.channel = True
@@ -344,3 +345,40 @@ class SessionNameTests(Environment):
             await asyncio.gather(task, return_exceptions=True)
             await adapter.client.close()
             del os.environ['CLAUDE_CODE_SESSION_ID'], os.environ['CLAUDE_CONFIG_DIR']
+
+
+class LaunchRegisterTests(Environment):
+    """Sessions opened by `agent-link claude|codex` register as soon as their MCP server starts."""
+
+    async def run_adapter(self, adapter):
+        task = asyncio.create_task(adapter.run())
+        try:
+            await until(lambda: adapter.identity is not None)
+            return adapter.whoami()
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await adapter.client.close()
+
+    async def test_claude_registers_under_its_session_name(self):
+        await self.server('gpu1')
+        sid = '33333333-4444-5555-6666-777777777777'
+        path = self.root / 'claude/projects/p' / f'{sid}.jsonl'
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps({'type': 'custom-title', 'customTitle': 'project-head'}) + '\n')
+        env = {'AGENT_LINK_REGISTER': '1', 'CLAUDE_CODE_SESSION_ID': sid, 'CLAUDE_CONFIG_DIR': str(self.root / 'claude')}
+        with unittest.mock.patch.dict(os.environ, env):
+            me = await self.run_adapter(Adapter('claude', self.root / 'gpu1/s.sock', channel=False))
+        self.assertEqual(me['id'], 'gpu1:claude:project-head')
+
+    async def test_codex_registers_with_its_thread_for_push(self):
+        await self.server('gpu1')
+        thread = '01a19a66-0c39-7fc2-a63e-6d7604dcebb9'
+        (self.root / 'codex').mkdir()
+        (self.root / 'codex/session_index.jsonl').write_text(json.dumps({'id': thread, 'thread_name': 'trainer'}) + '\n')
+        env = {'AGENT_LINK_REGISTER': '1', 'AGENT_LINK_THREAD': thread, 'CODEX_HOME': str(self.root / 'codex')}
+        with unittest.mock.patch.dict(os.environ, env):
+            me = await self.run_adapter(Adapter('codex', self.root / 'gpu1/s.sock'))
+        self.assertEqual(me['id'], 'gpu1:codex:trainer')
+        self.assertTrue(me['push']['available'])
+        self.assertEqual(self.spokes['gpu1'].agents['gpu1:codex:trainer'].delivery, 'push')

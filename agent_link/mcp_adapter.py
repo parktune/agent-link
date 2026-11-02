@@ -1,6 +1,6 @@
 """Session adapter: an MCP server that Claude Code or Codex spawns for each session (11, 12).
 
-The session registers on its first /agent-link use (or when `agent-link --resume` opens it). Incoming messages are pushed
+The session registers on its first /agent-link use (or when `agent-link claude|codex resume` opens it). Incoming messages are pushed
 into the open session when possible (Claude channel notification, `codex queue`); otherwise the
 daemon stores them in the session's mailbox folder.
 """
@@ -32,6 +32,11 @@ class Adapter:
         self.tool = tool
         self.client = SpokeClient(socket_path, self.inject)
         self.session_id = os.environ.get('CLAUDE_CODE_SESSION_ID' if tool == 'claude' else 'CODEX_THREAD_ID', '')
+        # Set by `agent-link claude|codex ...`: register when this MCP server starts ('1' = the session's name),
+        # and for Codex the thread to queue messages into.
+        self.launch_register = os.environ.get('AGENT_LINK_REGISTER', '')
+        if tool == 'codex':
+            self.session_id = self.session_id or os.environ.get('AGENT_LINK_THREAD', '')
         self.thread = self.session_id if tool == 'codex' else ''
         # Opting in at launch is not enough when the organization keeps Channels off: events would be dropped.
         self.channel_blocked = claude_channel_policy() if channel is None and tool == 'claude' else None
@@ -88,10 +93,17 @@ class Adapter:
             delay = min(delay * 2, 30)
 
     async def _restore(self):
+        launched = self.launch_register if self.launch_register not in ('', '1') else None
+        if self.registration is None and launched and NAME.fullmatch(launched):
+            self.registration = {'name': launched}
         if self.registration is None and self.session_id and not self.withdrawn:
             found = (await self.client.request('lookup', session_id=self.session_id)).get('agent')
             if found and found['tool'] == self.tool:
                 self.registration = {'name': found['name']}
+        if self.registration is None and self.launch_register and not self.withdrawn:
+            name = self.session_name()  # opened by agent-link: register under the /rename name right away
+            if name and NAME.fullmatch(name):
+                self.registration = {'name': name}
         if self.registration:
             await self._register()
 
@@ -126,7 +138,7 @@ class Adapter:
     def restart(self, name=None):
         """How to reopen this Claude session with push: exit it, then run `command`.
 
-        `command` is `agent-link --resume <session name>` (it finds the folder and adds the channel flag);
+        `command` is `agent-link claude resume <session name>` (it finds the folder and adds the channel flag);
         `by_id` uses the session ID instead; `full` is the plain claude command that also keeps the flags
         this session was started with.
         """
@@ -135,8 +147,8 @@ class Adapter:
         launch, cwd = claude_launch_args(), shlex.quote(os.getcwd())
         name = name or self.session_name()
         resume = name or self.session_id
-        return {'command': shlex.join(['agent-link', '--resume', resume]),
-                'by_id': shlex.join(['agent-link', '--resume', self.session_id]),
+        return {'command': shlex.join(['agent-link', 'claude', 'resume', resume]),
+                'by_id': shlex.join(['agent-link', 'claude', 'resume', self.session_id]),
                 'full': f'cd {cwd} && {shlex.join(claude_restart_argv(resume, launch))}', 'resume': resume}
 
     def whoami(self):
@@ -224,7 +236,7 @@ TOOLS = [
     ('whoami', 'Show whether this session is registered in agent-link, its agent ID, mailbox folder and push status. '
      'A Claude session without push also gets `watch` {enabled, running_pid, command}: when enabled and not running, '
      'run `command` in the background so this session wakes when mail arrives. It also gets `restart` {command, '
-     'by_id}: after the user exits this session, `command` (agent-link --resume) reopens it with push by its name.',
+     'by_id}: after the user exits this session, `command` (agent-link claude resume) reopens it with push by its name.',
      {}, []),
     ('unregister', 'Withdraw this session\'s registration (only when the user asks): other agents can no longer message '
      'it and its mailbox watch stops. The mailbox folder is kept.', {}, []),

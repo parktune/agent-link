@@ -19,7 +19,7 @@ Call `whoami`.
   - Claude: if `whoami` shows a valid `session_name` (set with `/rename`), call `register()` with no arguments.
   - Codex: run `printenv CODEX_THREAD_ID`; if it prints an ID, call `register(thread_id=<ID>)`.
   - If that fails (no `/rename` name, or the name has characters other than letters, digits, `_ . -`), stop and ask the user to name the session with `/rename <name>` (or to give a name, then call `register(name=<name>)`). Never invent a name.
-  - Mention the registered ID in one line. If `push.available` is false and `push.reason` is not about the organization, add once that messages go to the mailbox and that `agent-link --resume <session name>` in a terminal reopens this session with live push.
+  - Mention the registered ID in one line. If `push.available` is false and `push.reason` is not about the organization, add once that messages go to the mailbox and that `agent-link claude resume <session name>` in a terminal reopens this session with live push.
 - Claude: if the result has `watch` with `enabled` true and `running_pid` null, run `watch.command` exactly as given with Bash `run_in_background: true`. It exits when mail arrives, which wakes this session; then read the mailbox (section 3). Do not poll it.
 
 ## 2. Send a message
@@ -53,4 +53,4 @@ Only when the user asks. Report the result of `whoami` in a few lines (ID, push 
 - Rename, or register again after withdrawing: `register(name=<name>)` (Codex: also `thread_id`). The new name replaces the old one.
 - Withdraw: `unregister()`. Other agents can no longer reach this session, and `/agent-link` will not register it again on its own.
 - Mailbox watch (Claude without push): `set_watch(enabled=false)` stops it and keeps it off for this name; `set_watch(enabled=true)` turns it back on, then start `watch.command` as in section 1.
-- Live push for a Claude session: tell the user to leave this session and run `agent-link --resume <session name>` in a terminal. It reopens the session with the channel flag where the organization allows Channels, and otherwise with the mailbox watch.
+- Live push: tell the user to leave this session and run `agent-link claude resume <session name>` (Codex: `agent-link codex resume <session name>`) in a terminal. It reopens the session with the channel flag where the organization allows Channels, and otherwise with the mailbox watch.

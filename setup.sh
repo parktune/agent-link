@@ -66,6 +66,7 @@ cat <<'EOF'
 Next:
   server   : nothing else. The hub starts this server's daemon when it connects.
   local PC : agent-link hub discover   (pick servers from ~/.ssh/config)  or  agent-link hub add-host <ssh-alias>
-Then open Claude with live messages:  agent-link --resume <session name>   (or: agent-link --resume  to pick one)
+Then open a session so it can receive messages:  agent-link claude resume <session name>
+                                    (Codex: agent-link codex resume <session name>)
 and use /agent-link to message others (Codex: $agent-link); a session registers itself on first use.
 EOF

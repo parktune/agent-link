@@ -192,10 +192,12 @@ class ResumeTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.bin = self.root / 'bin'
         self.bin.mkdir()
-        fake = self.bin / 'claude'
-        fake.write_text(f'#!{sys.executable}\nimport json, os, sys\n'
-                        f'json.dump({{"argv": sys.argv[1:], "cwd": os.getcwd()}}, open({str(self.root / "ran.json")!r}, "w"))\n')
-        fake.chmod(0o755)
+        for tool in ('claude', 'codex'):
+            fake = self.bin / tool
+            fake.write_text(f'#!{sys.executable}\nimport json, os, sys\n'
+                            f'json.dump({{"tool": "{tool}", "argv": sys.argv[1:], "cwd": os.getcwd(), '
+                            f'"register": os.environ.get("AGENT_LINK_REGISTER")}}, open({str(self.root / "ran.json")!r}, "w"))\n')
+            fake.chmod(0o755)
         self.work = self.root / 'project'
         self.work.mkdir()
 
@@ -212,7 +214,9 @@ class ResumeTests(unittest.TestCase):
         return path
 
     def run_cli(self, *argv):
-        env = {**os.environ, 'PATH': f'{self.bin}:{os.environ["PATH"]}', 'CLAUDE_CONFIG_DIR': str(self.root / 'claude')}
+        env = {**os.environ, 'PATH': f'{self.bin}:{os.environ["PATH"]}', 'CLAUDE_CONFIG_DIR': str(self.root / 'claude'),
+               'CODEX_HOME': str(self.root / 'codex')}
+        (self.root / 'ran.json').unlink(missing_ok=True)
         result = subprocess.run([sys.executable, '-m', 'agent_link', *argv], env=env, capture_output=True, text=True,
                                 timeout=30, cwd=self.root)
         ran = json.loads((self.root / 'ran.json').read_text()) if (self.root / 'ran.json').exists() else None
@@ -256,6 +260,45 @@ class ResumeTests(unittest.TestCase):
         result, ran = self.run_cli('--resume', 'project-head')
         self.assertEqual(ran['argv'][:2], ['--dangerously-load-development-channels', 'server:agent-link'])
         self.assertIn('push', result.stderr)
+
+    def test_claude_subcommand_forms_register_on_launch(self):
+        sid = '11111111-2222-3333-4444-555555555555'
+        self.transcript(sid, 'project-head', self.work)
+        for argv in (('claude', 'resume', 'project-head'), ('claude', '--resume', 'project-head')):
+            result, ran = self.run_cli(*argv)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((ran['tool'], ran['argv'][-2:], ran['cwd'], ran['register']),
+                             ('claude', ['--resume', sid], str(self.work), '1'))
+        _, ran = self.run_cli('claude', 'continue')
+        self.assertEqual(ran['argv'][-1], '--continue')
+
+    def codex_thread(self, thread, title, cwd):
+        rollout = self.root / 'codex/sessions/2026/11/02' / f'rollout-2026-11-02T10-00-00-{thread}.jsonl'
+        rollout.parent.mkdir(parents=True, exist_ok=True)
+        rollout.write_text(json.dumps({'type': 'session_meta', 'payload': {'id': thread, 'cwd': str(cwd)}}) + '\n')
+        with open(self.root / 'codex/session_index.jsonl', 'a') as index:
+            index.write(json.dumps({'id': thread, 'thread_name': title}) + '\n')
+
+    def test_codex_resume_by_name_passes_the_thread_to_the_mcp_server(self):
+        thread = '01a19a66-0c39-7fc2-a63e-6d7604dcebb9'
+        self.codex_thread(thread, 'trainer', self.work)
+        result, ran = self.run_cli('codex', 'resume', 'trainer', '--', '--model', 'gpt-5')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(ran['argv'], ['-c', 'mcp_servers.agent-link.env.AGENT_LINK_REGISTER="1"',
+                                       '-c', f'mcp_servers.agent-link.env.AGENT_LINK_THREAD="{thread}"',
+                                       'resume', thread, '--model', 'gpt-5'])
+        self.assertEqual(ran['cwd'], str(self.work))
+        _, ran = self.run_cli('codex', '--resume', thread)
+        self.assertEqual(ran['argv'][-2:], ['resume', thread])
+
+    def test_codex_last_picks_this_folders_newest_thread_and_picker_has_none(self):
+        self.codex_thread('22222222-0000-0000-0000-000000000000', 'elsewhere', self.root)
+        result, ran = self.run_cli('codex', 'last')
+        self.assertEqual(ran['argv'][-2:], ['resume', '22222222-0000-0000-0000-000000000000'])
+        _, ran = self.run_cli('codex', 'resume')
+        self.assertEqual(ran['argv'], ['-c', 'mcp_servers.agent-link.env.AGENT_LINK_REGISTER="1"', 'resume'])
+        result, ran = self.run_cli('codex', 'resume', 'nobody')
+        self.assertEqual((result.returncode, ran), (1, None))
 
     def test_unknown_name_and_mixing_with_subcommands_are_errors(self):
         result, ran = self.run_cli('--resume', 'nobody')

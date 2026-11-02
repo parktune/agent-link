@@ -432,12 +432,17 @@ def build_parser():
     parser = argparse.ArgumentParser(prog='agent-link', description='agent-link: the hub on the local PC (agent-link hub ...) '
                                      'and the daemon on each server')
     opening = parser.add_mutually_exclusive_group()
-    opening.add_argument('--resume', nargs='?', const='', metavar='SESSION',
-                         help='Open a Claude session with live agent-link messages: its /rename name or session ID '
-                              '(no value: pick one). Arguments after -- go to claude.')
-    opening.add_argument('--continue', dest='continue_', action='store_true',
-                         help="Same, for this folder's most recent Claude conversation")
+    opening.add_argument('--resume', nargs='?', const='', metavar='SESSION', help='Same as `agent-link claude --resume`')
+    opening.add_argument('--continue', dest='continue_', action='store_true', help='Same as `agent-link claude --continue`')
     commands = parser.add_subparsers(dest='command')
+    for tool, latest in (('claude', 'continue'), ('codex', 'last')):
+        session = commands.add_parser(tool, help=f'Open {tool} registered with agent-link: resume [SESSION] | {latest}. '
+                                                 f'Arguments after -- go to {tool}.')
+        session.add_argument('words', nargs='*', metavar='resume [SESSION] | ' + latest,
+                             help='SESSION is the /rename name or the session ID; resume without one opens the picker')
+        session.add_argument('--resume', nargs='?', const='', metavar='SESSION')
+        session.add_argument('--continue', '--last', dest='continue_', action='store_true',
+                             help="This folder's most recent conversation")
     status = commands.add_parser('status', help='Connection status: the hub and its servers on the PC, the daemon on a server')
     status.add_argument('--socket', type=Path)
     status.add_argument('--json', action='store_true', help='Everything the hub or daemon reports, as JSON')
@@ -656,46 +661,100 @@ ARM_WATCH = ('agent-link: this session receives agent-link messages through its 
              'watch is on, then wait for the user.')
 
 
-def open_claude(resume=None, continue_=False, extra=()):
-    """Run claude so this session receives agent-link messages.
+def say_err(text):
+    print(f'agent-link: {text}', file=sys.stderr, flush=True)
+
+
+def pick_session(found, what, target):
+    if not found:
+        raise SystemExit(f'No {what} session named "{target}" (the name given with /rename, or a session ID). '
+                         f'Run `agent-link {what.lower()} resume` to pick one.')
+    for other in found[1:]:
+        say_err(f'also named "{target}": {other["id"]} in {other["cwd"] or "?"}; opening the most recent one')
+    session = found[0]
+    if session['cwd'] and os.path.isdir(session['cwd']):
+        os.chdir(session['cwd'])  # resume finds (and runs) a session in the folder it belongs to
+    return session
+
+
+def launch(argv, shown=None):
+    os.environ['AGENT_LINK_REGISTER'] = '1'  # the session's agent-link MCP server registers it on start
+    say_err(f'{shlex.join(shown or argv)}  (in {os.getcwd()})')
+    os.execvp(argv[0], argv)
+
+
+def open_claude(action=None, target=None, extra=()):
+    """Run claude registered with agent-link and able to receive messages.
 
     Where the login may use Channels, add the agent-link channel flag (push). Where the organization keeps
     Channels off, the flag would only be ignored, so open without it and pass a first prompt that arms the
-    mailbox watch. Resumes a session by name or ID, opens the picker, or continues this folder's latest one.
+    mailbox watch. `action` is 'resume' (by name or ID, or the picker without one), 'continue' (this folder's
+    latest conversation) or None (a new session).
     """
     from .inject import claude_channel_policy
     from .sessions import find_claude_sessions
     if not shutil.which('claude'):
         raise SystemExit('claude (Claude Code) is not on PATH')
-    if continue_:
-        mode, picker = ['--continue'], False
-    elif not resume:
-        mode, picker = ['--resume'], True
+    picker = action == 'resume' and not target
+    if action == 'continue':
+        mode = ['--continue']
+    elif action == 'resume' and target:
+        mode = ['--resume', pick_session(find_claude_sessions(target), 'Claude', target)['id']]
     else:
-        found = find_claude_sessions(resume)
-        if not found:
-            raise SystemExit(f'No Claude session named "{resume}" (the name given with /rename, or a session ID). '
-                             'Run `agent-link --resume` to pick one.')
-        session = found[0]
-        for other in found[1:]:
-            print(f'agent-link: also named "{resume}": {other["id"]} in {other["cwd"] or "?"}; '
-                  f'opening the most recent one', file=sys.stderr)
-        if session['cwd'] and os.path.isdir(session['cwd']):
-            os.chdir(session['cwd'])  # claude --resume only finds sessions of the folder it starts in
-        mode, picker = ['--resume', session['id']], False
+        mode = ['--resume'] if picker else []
     blocked = claude_channel_policy()
     if not blocked:
-        argv = ['claude', *CHANNEL, *mode, *extra]
-        print('agent-link: messages arrive live in this session (push).', file=sys.stderr)
+        say_err('messages arrive live in this session (push).')
+        return launch(['claude', *CHANNEL, *mode, *extra])
+    arm = action is not None and not picker  # a new or picked session has no known name to register yet
+    say_err(f'{blocked}.')
+    say_err('messages go to the mailbox; ' + ('the session starts the mailbox watch as its first step and wakes '
+            'when mail arrives.' if arm else 'after the session opens (and has a /rename name), run /agent-link '
+            'once to start the watch that wakes it.'))
+    argv = ['claude', *mode, *extra] + ([ARM_WATCH] if arm else [])
+    return launch(argv, [part if part != ARM_WATCH else '<arm the mailbox watch>' for part in argv])
+
+
+def open_codex(action=None, target=None, extra=()):
+    """Run codex registered with agent-link. The thread is known up front, so messages are queued into it.
+
+    Codex passes only some environment to MCP servers, so the registration hints go in as config overrides.
+    """
+    from .sessions import find_codex_sessions, latest_codex_session
+    if not shutil.which('codex'):
+        raise SystemExit('codex is not on PATH')
+    session = None
+    if action == 'resume' and target:
+        session = pick_session(find_codex_sessions(target), 'Codex', target)
+    elif action == 'continue':
+        session = latest_codex_session(os.getcwd())
+        if not session:
+            raise SystemExit(f'No Codex session ran in {os.getcwd()} yet. Use `agent-link codex resume <name>`.')
+    env = [('AGENT_LINK_REGISTER', '1')] + ([('AGENT_LINK_THREAD', session['id'])] if session else [])
+    overrides = [part for key, value in env for part in ('-c', f'mcp_servers.agent-link.env.{key}={json.dumps(value)}')]
+    if session:
+        mode = ['resume', session['id']]
+        say_err('messages are queued into this session (codex queue).')
     else:
-        argv = ['claude', *mode, *extra] + ([] if picker else [ARM_WATCH])
-        print(f'agent-link: {blocked}.', file=sys.stderr)
-        print('agent-link: messages go to the mailbox; ' + (
-            'after the session opens, run /agent-link once to start the watch that wakes it.' if picker else
-            'the session starts the mailbox watch as its first step and wakes when mail arrives.'), file=sys.stderr)
-    shown = [part if part != ARM_WATCH else '<arm the mailbox watch>' for part in argv]
-    print(f'agent-link: {shlex.join(shown)}  (in {os.getcwd()})', file=sys.stderr, flush=True)
-    os.execvp('claude', argv)
+        mode = ['resume'] if action == 'resume' else []
+        say_err('the thread is not known yet, so messages go to the mailbox until you run $agent-link once in the '
+                'session (after /rename).')
+    return launch(['codex', *overrides, *mode, *extra])
+
+
+SESSION_ACTIONS = {'resume': 'resume', 'continue': 'continue', 'last': 'continue'}
+
+
+def session_action(parser, args):
+    """`resume [SESSION]`, `continue`/`last`, or the same as --resume/--continue/--last: (action, target)."""
+    action = 'resume' if args.resume is not None else 'continue' if args.continue_ else None
+    target = args.resume or None
+    words = list(getattr(args, 'words', None) or [])
+    if words:
+        if words[0] not in SESSION_ACTIONS or len(words) > 2 or (len(words) == 2 and words[0] != 'resume'):
+            parser.error('use: resume [SESSION] | continue (codex: last)')
+        action, target = SESSION_ACTIONS[words[0]], words[1] if len(words) == 2 else target
+    return action, target
 
 
 def agent_link(argv=None):
@@ -705,12 +764,15 @@ def agent_link(argv=None):
     if '--' in argv:  # everything after -- belongs to claude
         argv, passthrough = argv[:argv.index('--')], argv[argv.index('--') + 1:]
     args = parser.parse_args(argv)
-    if args.resume is not None or args.continue_:
+    if args.command in ('claude', 'codex'):
+        action, target = session_action(parser, args)
+        return (open_claude if args.command == 'claude' else open_codex)(action, target, passthrough)
+    if args.resume is not None or args.continue_:  # shorthand for `agent-link claude ...`
         if args.command:
             parser.error('--resume/--continue cannot be combined with a subcommand')
-        return open_claude(args.resume, args.continue_, passthrough)
+        return open_claude(*session_action(parser, args), passthrough)
     if passthrough:
-        parser.error('arguments after -- are only for --resume/--continue')
+        parser.error('arguments after -- are only for agent-link claude|codex')
     if not args.command:
         parser.error('choose a command (e.g. status, up, hub ...) or --resume SESSION')
     if args.command == 'status':

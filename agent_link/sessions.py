@@ -86,3 +86,48 @@ def find_claude_sessions(name, config_dir=None):
         found.append({'id': path.stem, 'cwd': cwd, 'mtime': path.stat().st_mtime})
     return sorted(found, key=lambda s: s['mtime'], reverse=True)
 
+
+def _codex_home(codex_home=None):
+    return Path(codex_home or os.environ.get('CODEX_HOME') or Path.home() / '.codex')
+
+
+def _codex_meta(path):
+    """(thread id, cwd) from the first line of a Codex rollout file (`session_meta`)."""
+    try:
+        with open(path, errors='replace') as handle:
+            payload = json.loads(handle.readline()).get('payload') or {}
+    except (OSError, ValueError, AttributeError):
+        return None, ''
+    return payload.get('id') or payload.get('session_id'), payload.get('cwd') or ''
+
+
+def _codex_rollouts(home, thread='*'):
+    paths = (home / 'sessions').glob(f'*/*/*/rollout-*-{thread}.jsonl')
+    return sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def find_codex_sessions(name, codex_home=None):
+    """Codex threads to resume for `name` (its /rename name or thread ID), newest first: [{'id', 'cwd', 'mtime'}]."""
+    home = _codex_home(codex_home)
+    ids = [name] if SESSION_ID.fullmatch(name) and _codex_rollouts(home, name) else []
+    if not ids:
+        latest = {}
+        for entry in _entries(home / 'session_index.jsonl', '"thread_name"'):
+            if entry.get('id'):
+                latest[entry['id']] = entry.get('thread_name')
+        ids = [thread for thread, title in latest.items() if title == name]
+    found = []
+    for thread in ids:
+        paths = _codex_rollouts(home, thread)
+        if paths:
+            found.append({'id': thread, 'cwd': _codex_meta(paths[0])[1], 'mtime': paths[0].stat().st_mtime})
+    return sorted(found, key=lambda s: s['mtime'], reverse=True)
+
+
+def latest_codex_session(cwd, codex_home=None, limit=500):
+    """The newest Codex thread that ran in `cwd` (what `codex resume --last` would pick), or None."""
+    for path in _codex_rollouts(_codex_home(codex_home))[:limit]:
+        thread, where = _codex_meta(path)
+        if thread and where == str(cwd):
+            return {'id': thread, 'cwd': where, 'mtime': path.stat().st_mtime}
+    return None
