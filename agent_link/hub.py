@@ -381,7 +381,8 @@ class Hub:
         self.local = Spoke(local_config, SpokeStore(self.root / 'local.sqlite3'), log, Box(box_root),
                            uplink=HubUplink(self), accept_links=False)
         self.local.list_agents = self.list_agents
-        self.local.extra_ops = {'hosts': self._hosts_op, 'recent': self._recent_op, 'reload': self._reload_op}
+        self.local.extra_ops = {'hosts': self._hosts_op, 'recent': self._recent_op, 'reload': self._reload_op,
+                                'status': self._status_op}
         self.transport_factory = transport_factory
         self.links = {}
         self.presence = {}
@@ -434,6 +435,12 @@ class Hub:
                           'registered_at': record['registered_at'], 'last_seq': record['last_seq'],
                           **(link.status() if link else {'connected': False})})
         return {'op': 'hosts', 'hosts': hosts, 'pid': os.getpid()}
+
+    async def _status_op(self, frame):
+        hosts = (await self._hosts_op(frame))['hosts']
+        return {'op': 'status', 'role': 'hub', 'host': LOCAL_HOST, 'pid': os.getpid(),
+                'hosts_connected': sum(1 for h in hosts if h.get('connected')), 'hosts': hosts,
+                'agents': self.all_agents()}
 
     async def _reload_op(self, frame):
         records = {record['name']: record for record in self.store.hosts()}

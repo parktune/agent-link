@@ -396,7 +396,7 @@ async def drop_link(spoke):
 
 async def status(spoke):
     hub = spoke.link.info if spoke.link else None
-    return {'op': 'status', 'host': spoke.host, 'pid': os.getpid(), 'hub_connected': spoke.link is not None,
+    return {'op': 'status', 'role': 'spoke', 'host': spoke.host, 'pid': os.getpid(), 'hub_connected': spoke.link is not None,
             'hub': readable(hub) if hub else None, 'enrolled_hubs': [readable(h) for h in spoke.store.enrolled_hubs()],
             'outbox': spoke.store.outbox_stats(), 'agents': spoke.list_agents()}
 
@@ -405,6 +405,30 @@ def readable(info):
     """Timestamps as local time for people reading `agent-hub status`."""
     return {k: time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(v)) if k in ('enrolled_at', 'connected_since') else v
             for k, v in info.items()}
+
+
+def agent_link(argv=None):
+    """`agent-link status`: the same check on the local PC (hub) and on a server (spoke daemon)."""
+    parser = argparse.ArgumentParser(prog='agent-link', description='agent-link on this machine')
+    commands = parser.add_subparsers(dest='command', required=True)
+    commands.add_parser('status', help='Connection status: hub and its servers on the PC, the daemon on a server') \
+        .add_argument('--socket', type=Path)
+    args = parser.parse_args(argv)
+    socket_path = args.socket or default_socket()
+    if not service.alive(socket_path):
+        raise SystemExit('agent-link is not running on this machine. '
+                         'Local PC: `hubctl up` (or `hubctl add-host <alias>`); server: `agent-hub up`.')
+    try:
+        emit(asyncio.run(ask(socket_path, 'status')))
+    except ProtocolError as error:
+        raise SystemExit(f'The running hub/daemon does not answer status ({error.code}); it is an older version. '
+                         'Restart it: `systemctl --user restart agent-link-hub` (PC) or '
+                         '`systemctl --user restart agent-link-spoke` (server).') from None
+    return 0
+
+
+def agent_link_main():
+    sys.exit(agent_link())
 
 
 def hubctl_main():

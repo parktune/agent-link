@@ -80,6 +80,7 @@ agent-hub revoke                    # 서버: 토큰 해시 삭제, 현재 연�
 ## 5. 상태 확인
 
 ```bash
+agent-link status       # 어디서든: PC면 hub와 서버 연결, 서버면 daemon과 hub 연결
 hubctl hosts            # 호스트별 연결 상태, 재연결 횟수, 마지막 오류
 hubctl agents [필터]     # 전체 에이전트
 hubctl log --limit 50   # 라우팅된 메시지 메타데이터(본문 없음)

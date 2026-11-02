@@ -50,8 +50,21 @@ class UpTests(unittest.TestCase):
                                                    check=True).stdout)
                 self.assertIsNone(second['started'])
                 self.assertEqual(second['host'], 'gpu-server-1')
+                status = json.loads(subprocess.run([sys.executable, '-m', 'agent_link', 'agent-link', 'status'], env=env,
+                                                   capture_output=True, text=True, timeout=30, check=True).stdout)
+                self.assertEqual((status['role'], status['host'], status['hub_connected']), ('spoke', 'gpu-server-1', False))
             finally:
                 status = subprocess.run([sys.executable, '-m', 'agent_link', 'agent-hub', 'status'], env=env,
                                         capture_output=True, text=True, timeout=30)
                 os.kill(json.loads(status.stdout)['pid'], signal.SIGTERM)
                 time.sleep(0.2)
+
+
+class StatusCommandTests(unittest.TestCase):
+    def test_agent_link_status_explains_when_nothing_runs(self):
+        with tempfile.TemporaryDirectory(prefix='al-') as state:
+            env = {**os.environ, 'AGENT_HUB_STATE': state}
+            result = subprocess.run([sys.executable, '-m', 'agent_link', 'agent-link', 'status'], env=env,
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('not running on this machine', result.stderr)

@@ -40,10 +40,10 @@ echo "[2/4] installed agent-link $(.venv/bin/python -c 'import agent_link; print
 echo "[3/4] installed /agent-link, the agent-link:register/settings plugin and the MCP server"
 
 mkdir -p "$HOME/.local/bin"
-for command in hubctl agent-hub; do
+for command in agent-link hubctl agent-hub; do
     ln -sf "$REPO/.venv/bin/$command" "$HOME/.local/bin/$command"
 done
-echo "[4/4] linked hubctl and agent-hub into ~/.local/bin"
+echo "[4/4] linked agent-link, hubctl and agent-hub into ~/.local/bin"
 case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
     *) echo "      note: add ~/.local/bin to PATH (e.g. in ~/.bashrc) to run them by name" ;;

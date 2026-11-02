@@ -75,9 +75,12 @@ $agent-link trainer 체크포인트 경로 알려줘
 ## 확인 명령
 
 ```bash
-hubctl hosts | hubctl agents | hubctl log      # 로컬 PC
-agent-hub status                                # 서버
+agent-link status      # 로컬 PC와 서버 어디서든 연결 상태 확인
 ```
+
+- 로컬 PC에서는 hub 상태를 보여 줍니다. 서버별 연결 여부(`hosts_connected`, `hosts`)와 전체 세션 목록이 나옵니다.
+- 서버에서는 daemon 상태를 보여 줍니다. hub 연결 여부, 연결된 hub의 이름·접속 주소, 그 서버의 세션 목록이 나옵니다.
+- 더 자세히 보려면 로컬 PC에서 `hubctl hosts`, `hubctl agents`, `hubctl log`를 씁니다.
 
 ## 상태
 

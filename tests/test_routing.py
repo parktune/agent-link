@@ -152,6 +152,22 @@ class HubTests(Environment):
         await until(lambda: trainer.received)
         self.assertEqual(trainer.received[0]['to'], 'gpu2:codex:trainer')
 
+    async def test_hub_status_lists_hosts_and_agents(self):
+        await self.two_hosts()
+        await self.session('local', 'claude', 'main')
+        await self.session('gpu1', 'claude', 'head')
+        await self.connected('gpu1')
+        await self.connected('gpu2')
+        from agent_link.client import SpokeClient
+        client = SpokeClient(self.root / 'hub.sock')
+        await client.connect()
+        try:
+            status = await client.request('status')
+        finally:
+            await client.close()
+        self.assertEqual((status['role'], status['host'], status['hosts_connected']), ('hub', 'local', 2))
+        self.assertEqual({a['id'] for a in status['agents']}, {'local:claude:main', 'gpu1:claude:head'})
+
     async def test_unknown_session_on_remote_host_is_not_found(self):
         await self.two_hosts()
         main = await self.session('local', 'claude', 'main')
