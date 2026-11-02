@@ -1,34 +1,39 @@
 # agent-link
 
-## 처음 설정
+## 설치
 
-**1. 각 서버(spoke)에서** — 설치만 하면 끝입니다. daemon은 3번에서 로컬 PC가 SSH로 띄웁니다.
-
-```bash
-git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup.sh
-```
-
-**2. 로컬 PC(hub)에서** — 똑같이 설치합니다.
+로컬 PC(hub)와 각 서버(spoke)에서 똑같이, 설치할 폴더에서 실행합니다. 서버에서는 이것으로 끝입니다.
 
 ```bash
 git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup.sh
 ```
 
-**3. 로컬 PC에서 서버 연결** — 서버마다 한 번입니다. hub도 이때 자동으로 뜹니다.
+`setup.sh`는 다음을 처리합니다.
+- Python 3.11+로 `.venv`를 만듭니다.
+- Claude Code·Codex에 `/agent-link` 스킬과 MCP 서버를 등록합니다.
+- `~/.local/bin`에 `agent-link`를 링크합니다.
+
+## 서버 연결 (로컬 PC에서)
 
 ```bash
-agent-link hub discover              # ~/.ssh/config 호스트 목록에서 Space로 고르고 Enter
-agent-link hub add-host gpu-server-1 # 또는 alias를 직접 지정
+agent-link hub discover
 ```
 
-**4. 확인** — 로컬 PC에서 `agent-link status`를 실행해 `servers N/N connected`가 나오면 됩니다.
+**호스트 목록의 출처**
+`~/.ssh/config`에 적어 둔 `Host` 항목(alias)을 체크리스트로 보여 줍니다. `Include`된 파일도 읽고, `*` 같은 패턴 항목은 뺍니다.
+- 연결할 서버를 ↑↓로 고르고 Space로 선택한 뒤 Enter로 확정합니다. `q`는 아무것도 바꾸지 않고 끝냅니다. 이미 연결된 서버는 `(등록됨)`으로 표시됩니다.
+- 접속에는 그 alias에 적힌 `HostName`, `User`, `IdentityFile`, `ProxyJump`가 그대로 쓰입니다. agent-link가 따로 주소나 계정을 묻지 않습니다.
+- 서버 이름(세션 ID의 앞부분)은 alias가 됩니다. 예를 들어 `Host gpu-server-1`이면 `gpu-server-1:claude:<세션>`입니다.
 
-**5. 세션 열기** — 세션을 쓸 머신(PC나 서버)에서 `agent-link claude resume <세션 이름>` 또는 `agent-link codex resume <세션 이름>`을 실행합니다. 아래 사용법을 참고하세요.
+**고른 서버마다 일어나는 일**
+SSH로 들어가 daemon을 띄우고, 1회용 초대로 토큰을 등록하고, 로컬 hub를 띄워 연결까지 확인합니다. 서버마다 한 번만 하면 되고, hub와 daemon은 systemd user 서비스로 등록돼 재부팅 후에도 다시 뜹니다.
 
-- 설치 폴더는 어디든 됩니다. `setup.sh`가 Python 3.11+ `.venv`를 만들고, Claude Code·Codex에 `/agent-link` 스킬과 MCP 서버를 등록하고, `~/.local/bin`에 `agent-link`를 링크합니다.
-- 3번 전에 `ssh gpu-server-1`이 비밀번호 없이 되고, 서버 host key가 known_hosts에 있어야 합니다.
-- `add-host`는 SSH로 서버의 daemon을 띄우고, 1회용 초대로 토큰을 등록하고, 로컬 hub를 띄워 연결까지 확인합니다. 호스트 이름은 alias가 됩니다(`--name`으로 변경).
-- hub와 daemon은 systemd user 서비스로 등록돼 재부팅 후에도 다시 뜹니다.
+**미리 준비할 것** (서버마다)
+- 그 서버에 위의 설치가 끝나 있어야 합니다.
+- `ssh <alias>`가 비밀번호 없이 되어야 합니다.
+- 서버 host key가 known_hosts에 있어야 합니다. agent-link는 처음 보는 host key를 자동으로 받아들이지 않습니다.
+
+연결되면 `agent-link status`에 `servers N/N connected`가 나옵니다. 이후 세션은 아래 사용법대로 `agent-link claude|codex resume <세션 이름>`으로 엽니다.
 
 ## 업데이트·상태
 
@@ -79,6 +84,16 @@ $agent-link trainer 체크포인트 경로 알려줘
 ```
 
 연결은 항상 로컬 PC에서 서버로 SSH를 겁니다. 서버에 SSH 외에 여는 포트는 없습니다. 같은 서버 안의 세션끼리는 hub를 거치지 않습니다. hub와 daemon은 systemd user 서비스로 돕니다.
+
+## 수동 연결
+
+`discover`를 쓸 수 없을 때(터미널이 아닌 곳 등)만 씁니다.
+
+```bash
+agent-link hub add-host gpu-server-1                  # alias 하나를 직접 연결 (--name으로 서버 이름 변경)
+agent-link hub discover --hosts gpu-server-1,gpu-server-2   # 체크리스트 없이 여러 개
+agent-link hub remove-host gpu-server-1               # 연결 해제 (서버에서는 agent-link revoke)
+```
 
 ## 알아두기
 
