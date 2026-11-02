@@ -2,6 +2,8 @@
 # One-time setup on each machine (local PC and every server): venv, package, skill + MCP, commands.
 # Re-run after `git pull` to update. Changes only this repo and your own user config.
 set -eu
+# Fail when install.py fails even though its output is piped to sed (dash 0.5.11+, bash, zsh).
+(set -o pipefail) 2>/dev/null && set -o pipefail
 cd "$(dirname "$0")"
 REPO=$(pwd)
 

@@ -22,7 +22,11 @@ HOMES = {'claude': Path.home() / '.claude', 'codex': Path.home() / '.codex'}
 
 
 def output(argv):
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        print(f'note: {" ".join(argv)} timed out; treated as empty', flush=True)
+        return ''
     return result.stdout if result.returncode == 0 else ''
 
 
@@ -52,7 +56,9 @@ def codex_plan(replace):
     marketplaces = {line.split()[0] for line in output(['codex', 'plugin', 'marketplace', 'list']).splitlines()[1:] if line.strip()}
     if 'agent-link' not in marketplaces:
         steps.append(['codex', 'plugin', 'marketplace', 'add', str(REPO)])
-    rows = [line for line in output(['codex', 'plugin', 'list']).splitlines() if line.startswith(PLUGIN + ' ')]
+    # Without -m, `codex plugin list` also fetches remote marketplaces and can hang.
+    rows = [line for line in output(['codex', 'plugin', 'list', '-m', 'agent-link']).splitlines()
+            if line.startswith(PLUGIN + ' ')]
     installed = bool(rows) and 'not installed' not in rows[0]
     if installed and replace:
         steps.append(['codex', 'plugin', 'remove', PLUGIN])  # Codex installs a cached copy
