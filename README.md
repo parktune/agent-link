@@ -1,13 +1,5 @@
 # agent-link
 
-여러 서버와 로컬 PC에서 도는 Claude Code·Codex 세션이 서로 메시지를 주고받게 합니다.
-서로 다른 구독 계정의 세션도 함께 쓸 수 있습니다. 로컬 PC의 hub가 SSH로 각 서버에 붙는 hub-and-spoke 구조입니다.
-
-```
-[로컬 PC]  Claude/Codex 세션 ── hubctl serve (hub) ──SSH──┬── [서버 A] agent-hub daemon ── 세션들
-                                                          └── [서버 B] agent-hub daemon ── 세션들
-```
-
 ## 설치와 연결
 
 **1. 로컬 PC와 각 서버에서 똑같이** 실행합니다.
@@ -43,6 +35,16 @@ hubctl add-host gpu-server-1   # 또는 alias를 직접 지정
 준비되어 있어야 하는 것은 하나입니다. `ssh gpu-server-1`이 비밀번호 없이 되고 서버 host key가 known_hosts에 있어야 합니다. agent-link는 host key를 자동으로 받아들이지 않습니다.
 마지막에 출력되는 `authorized_keys` 한 줄은 전용 계정을 쓸 때의 선택적 보안 강화입니다. 전용 계정, 폐기, 설정은 [운영 가이드](docs/operations.md)에 있습니다.
 
+## 확인 명령
+
+```bash
+agent-link status      # 로컬 PC와 서버 어디서든 연결 상태 확인
+```
+
+- 로컬 PC에서는 hub 상태를 보여 줍니다. 서버별 연결 여부(`hosts_connected`, `hosts`)와 전체 세션 목록이 나옵니다.
+- 서버에서는 daemon 상태를 보여 줍니다. hub 연결 여부, 연결된 hub의 이름·접속 주소, 그 서버의 세션 목록이 나옵니다.
+- 더 자세히 보려면 로컬 PC에서 `hubctl hosts`, `hubctl agents`, `hubctl log`를 씁니다.
+
 ## 사용법
 
 `setup.sh`가 Claude Code·Codex에 명령 세 개를 설치합니다.
@@ -72,15 +74,14 @@ $agent-link trainer 체크포인트 경로 알려줘
   - 메시지 1건이 Markdown 파일 1개입니다. `/agent-link`로 확인하면 `received/read/`로 옮깁니다.
 - 서버 세션은 기본적으로 **받은 요청에 대한 회신만** 보낼 수 있습니다(`allow_origination`). 회신에 다시 회신하는 것은 거부합니다(에이전트 간 무한 핑퐁 방지).
 
-## 확인 명령
+## 구조
+여러 서버와 로컬 PC에서 도는 Claude Code·Codex 세션이 서로 메시지를 주고받게 합니다.
+서로 다른 구독 계정의 세션도 함께 쓸 수 있습니다. 로컬 PC의 hub가 SSH로 각 서버에 붙는 hub-and-spoke 구조입니다.
 
-```bash
-agent-link status      # 로컬 PC와 서버 어디서든 연결 상태 확인
 ```
-
-- 로컬 PC에서는 hub 상태를 보여 줍니다. 서버별 연결 여부(`hosts_connected`, `hosts`)와 전체 세션 목록이 나옵니다.
-- 서버에서는 daemon 상태를 보여 줍니다. hub 연결 여부, 연결된 hub의 이름·접속 주소, 그 서버의 세션 목록이 나옵니다.
-- 더 자세히 보려면 로컬 PC에서 `hubctl hosts`, `hubctl agents`, `hubctl log`를 씁니다.
+[로컬 PC]  Claude/Codex 세션 ── hubctl serve (hub) ──SSH──┬── [서버 A] agent-hub daemon ── 세션들
+                                                          └── [서버 B] agent-hub daemon ── 세션들
+```
 
 ## 상태
 
