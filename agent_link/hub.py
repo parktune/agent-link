@@ -23,7 +23,7 @@ POLL_ACTIVE, POLL_IDLE = 1, 10
 
 
 def hub_identity():
-    """What this hub tells servers about itself, shown in `agent-hub status`."""
+    """What this hub tells servers about itself, shown in `agent-link status` on the server."""
     try:
         user = getpass.getuser()
     except (KeyError, OSError):
@@ -42,6 +42,9 @@ class HubStore:
                 type TEXT NOT NULL, in_reply_to TEXT, hops INTEGER NOT NULL, size INTEGER NOT NULL, at REAL NOT NULL,
                 route TEXT NOT NULL, status TEXT NOT NULL);
         ''')
+        # Before 0.6.0 the server command was `agent-hub`; it is `agent-link` in the same folder now.
+        self.db.execute("UPDATE hosts SET remote_path = substr(remote_path, 1, length(remote_path) - 9) || 'agent-link' "
+                        "WHERE remote_path LIKE '%/agent-hub'")
 
     def hosts(self):
         return [dict(row) for row in self.db.execute('SELECT * FROM hosts ORDER BY name')]

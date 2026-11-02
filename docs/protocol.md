@@ -49,8 +49,8 @@ hub가 다시 시작하거나 절전에서 복귀해도 중복 전달이 없다.
 | `receive {limit}` | `messages {messages, box}` | 박스의 안 읽은 메시지. 읽은 파일은 `read/`로 옮긴다 |
 | `list {filter}` | `agents {agents}` | 서버 daemon은 자기 호스트만, hub는 전체를 돌려준다 |
 | `heartbeat`, `unregister` | `ok` | |
-| (hub 전용) `hosts`, `recent {limit}`, `reload` | | `hubctl` 명령용 |
-| (서버 daemon 전용) `status`, `drop_link` | | `agent-hub status`/`revoke` 명령용 |
+| (hub 전용) `hosts`, `recent {limit}`, `reload` | | `agent-link hub` 명령용 |
+| (서버 daemon 전용) `status`, `drop_link` | | `agent-link status`/`revoke` 명령용 |
 
 daemon → 어댑터: `deliver {msg, rid}`. 어댑터는 세션에 넣은 뒤 `delivered {rid}`, 실패하면 `error {rid, code}`로 답한다. 실패하면 daemon이 박스에 저장한다.
 

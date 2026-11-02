@@ -38,7 +38,7 @@ push가 실패하거나 스레드를 모르면 박스에 저장한다. 이것이
 자동 테스트와 `scripts/verify_ssh_loopback.py`로 확인했다. loopback 스크립트는 실제 OpenSSH와 임시 sshd를 쓰고 모델은 호출하지 않는다.
 
 - 강제 명령 endpoint + JSON Lines 유지 세션으로 요청과 회신이 왕복한다.
-- `hubctl add-host` 자동 흐름(DNS, TCP, SSH로 초대 발급, enroll, hello)이 실제 SSH에서 끝까지 진행된다.
+- `agent-link hub add-host` 자동 흐름(DNS, TCP, SSH로 초대 발급, enroll, hello)이 실제 SSH에서 끝까지 진행된다.
 - hub 재시작 후 outbox를 이어받고 중복이 없다(S7, S16). 한 호스트 장애가 다른 호스트에 영향을 주지 않는다(S6).
 - **미측정:** 장시간 유지 시 방화벽 idle timeout, ProxyJump 경유 지연, 50대 부하(S8). M4 범위다.
 
@@ -55,5 +55,5 @@ push가 실패하거나 스레드를 모르면 박스에 저장한다. 이것이
 | pull 폴백은 inbox + `receive` 도구 | `<repo>/hub` 또는 `<repo>/spoke` 아래 에이전트별 `received/` 폴더의 Markdown 파일 + `check_box` 도구 | 사용자 결정 |
 | allowlist 프레임 | `ping`/`pong`(keepalive)을 추가했고, `ack`에 선택 필드 `result`를 둔다 | 장애 감지, 그리고 서버 세션에 라우팅 결과(오류 포함)를 돌려주기 위해서다 |
 | `deliver` 응답 | `delivered {id, status}`이며 status는 `delivered`/`stored`/`stored_offline`이다 | 박스 저장을 구분하기 위해서다 |
-| add-host 사전 조건: 원격 실행 경로를 사용자가 알고, daemon이 실행 중 | `hubctl add-host <alias>`가 SSH로 `agent-hub`를 찾고, 꺼져 있으면 daemon을 systemd user 서비스(실패하면 백그라운드)로 띄운다. 로컬 hub도 같다. 패키지 설치는 여전히 하지 않는다(`setup.sh`를 사용자가 실행) | 사용자 요청(2026-11-02): alias만으로 연결 |
+| add-host 사전 조건: 원격 실행 경로를 사용자가 알고, daemon이 실행 중 | `agent-link hub add-host <alias>`가 SSH로 `agent-link`를 찾고, 꺼져 있으면 daemon을 systemd user 서비스(실패하면 백그라운드)로 띄운다. 로컬 hub도 같다. 패키지 설치는 여전히 하지 않는다(`setup.sh`를 사용자가 실행) | 사용자 요청(2026-11-02): alias만으로 연결 |
 | 서버 세션의 `list_agents` | 그 호스트의 에이전트만 보인다. 전체 목록은 로컬 PC에서만 보인다 | hub → host 레지스트리 전파 프레임이 명세에 없다 |

@@ -20,15 +20,15 @@ This is a new, independently unaudited implementation. Pilot it with non-sensiti
   The manual `--code` path reads it from a hidden prompt.
 - The hub generates a 256-bit peer token per host. Servers store only its SHA-256 hash; the hub
   keeps it in its 0600 SQLite database under a 0700 directory. Every endpoint session starts
-  with `hello` and is rejected `unauthorized` without a valid token. `agent-hub revoke` deletes
-  the hashes and drops the current hub connection; `hubctl remove-host` deletes the hub side.
+  with `hello` and is rejected `unauthorized` without a valid token. `agent-link revoke` deletes
+  the hashes and drops the current hub connection; `agent-link hub remove-host` deletes the hub side.
 - Per-agent tokens and permissions are out of MVP scope: any process that can open the local
   daemon socket can register as a session on that host.
 
 ## SSH account
 
 The recommended setup is a dedicated OS account whose `authorized_keys` entry for the hub key is
-`restrict,command="<abs path>/agent-hub endpoint"`. The endpoint passes only the allowlisted frames
+`restrict,command="<abs path>/agent-link endpoint"`. The endpoint passes only the allowlisted frames
 (`hello`, `enroll`, `deliver`, `ack`, `exchange`, `ping`) and has no shell, file, session selection or
 turn-start operation. With an ordinary shell-enabled key the allowlist does not sandbox the
 account: the key itself grants a shell.

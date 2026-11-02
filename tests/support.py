@@ -55,7 +55,7 @@ async def until(predicate, timeout=10):
 
 
 class Environment(unittest.IsolatedAsyncioTestCase):
-    """A hub plus server spokes in one temp dir; links run `python -m agent_link agent-hub endpoint`."""
+    """A hub plus server spokes in one temp dir; links run `python -m agent_link endpoint`."""
 
     async def asyncSetUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='al-')
@@ -86,7 +86,7 @@ class Environment(unittest.IsolatedAsyncioTestCase):
     def transport(self, record):
         if record['name'] in self.broken:
             return CommandTransport([sys.executable, '-c', 'import sys; sys.exit(1)'])
-        return CommandTransport([sys.executable, '-m', 'agent_link', 'agent-hub', 'endpoint',
+        return CommandTransport([sys.executable, '-m', 'agent_link', 'endpoint',
                                  '--socket', str(self.root / record['name'] / 's.sock')])
 
     async def start_hub(self, **config):

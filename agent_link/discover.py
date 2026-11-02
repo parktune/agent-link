@@ -1,4 +1,4 @@
-"""`hubctl discover`: pick servers from ~/.ssh/config in a checklist (Space to pick, Enter to apply)."""
+"""`agent-link hub discover`: pick servers from ~/.ssh/config in a checklist (Space to pick, Enter to apply)."""
 import glob
 import locale
 import os

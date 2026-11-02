@@ -4,7 +4,7 @@
 
 ## 결정
 
-- hub는 호스트마다 시스템 `ssh`를 하위 프로세스로 실행하고 `<절대경로>/agent-hub endpoint`와 stdin/stdout으로 JSON Lines를 주고받는다.
+- hub는 호스트마다 시스템 `ssh`를 하위 프로세스로 실행하고 `<절대경로>/agent-link endpoint`와 stdin/stdout으로 JSON Lines를 주고받는다.
 - 한 호스트에 SSH 세션 하나를 오래 유지한다. 요청마다 새로 연결하지 않는다. SSH 수준에서는 `ServerAliveInterval=15`, 앱 수준에서는 15초 `ping`으로 연결을 감시하고, 45초 동안 아무 프레임도 없으면 다시 연결한다.
 - 다시 연결할 때는 1초에서 시작해 최대 60초까지 지수 백오프에 ±20% 지터를 더한다. 호스트마다 독립된 asyncio 태스크로 돈다.
 - `ControlMaster`는 끈다(`ControlMaster=no`, `ControlPath=none`). 유지 세션 자체가 연결 재사용을 대신하고, 다른 SSH 세션과 섞이지 않게 하기 위해서다.

@@ -2,7 +2,7 @@
 
 Used when a message cannot be pushed into an open session: the session is closed, push is not
 available for it, or the push failed. Layout: <root>/<tool>-<name>/received/[read/]<file>.md, plus
-<root>/<tool>-<name>/watch.pid while a session waits for mail with `agent-hub wait-box`, and
+<root>/<tool>-<name>/watch.pid while a session waits for mail with `agent-link wait-box`, and
 <root>/<tool>-<name>/watch.off when the user turned that watch off.
 """
 import os

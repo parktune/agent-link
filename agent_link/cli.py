@@ -1,4 +1,4 @@
-"""Command lines: `hubctl` (local PC) and `agent-hub` (server)."""
+"""The `agent-link` command: `agent-link hub ...` on the local PC, the other subcommands on each server."""
 import argparse
 import asyncio
 import getpass
@@ -47,7 +47,7 @@ async def run_forever(start, close):
         await close()
 
 
-# ---- hubctl ---------------------------------------------------------------------------------
+# ---- local PC (hub) ---------------------------------------------------------------------------------
 def ssh_options(alias, ssh_config=None):
     argv = ['ssh'] + (['-F', ssh_config] if ssh_config else []) + ['-G', alias]
     result = subprocess.run(argv, capture_output=True, text=True, timeout=10)
@@ -88,13 +88,13 @@ def explain_ssh_failure(stderr):
     if 'Permission denied' in stderr:
         return 'SSH key authentication failed (BatchMode, no passwords).'
     if 'No such file' in stderr or 'not found' in stderr:
-        return 'remote path not found. Check --remote-path (absolute path of agent-hub on the server).'
+        return 'remote path not found. Check --remote-path (absolute path of agent-link on the server).'
     return 'SSH failed: ' + stderr.strip()[-300:]
 
 
-# setup.sh links agent-hub into ~/.local/bin wherever the clone lives; a non-interactive SSH shell
+# setup.sh links agent-link into ~/.local/bin wherever the clone lives; a non-interactive SSH shell
 # may not have that on PATH, so check it explicitly. The first executable match wins.
-SEARCH = ('"$(command -v agent-hub 2>/dev/null)"', '"$HOME/.local/bin/agent-hub"')
+SEARCH = ('"$(command -v agent-link 2>/dev/null)"', '"$HOME/.local/bin/agent-link"')
 
 
 def remote_up_command(remote_path, host_name):
@@ -103,29 +103,29 @@ def remote_up_command(remote_path, host_name):
         return shlex.join([remote_path] + up)
     args = shlex.join(up)
     return (f'for p in {" ".join(SEARCH)}; do if [ -n "$p" ] && [ -x "$p" ]; then '
-            f'exec "$(readlink -f "$p")" {args}; fi; done; echo agent-hub-not-found >&2; exit 3')
+            f'exec "$(readlink -f "$p")" {args}; fi; done; echo agent-link-not-found >&2; exit 3')
 
 
 def remote_up(alias, remote_path, host_name, ssh_config=None):
-    """One SSH call: find agent-hub, start its daemon if needed, issue a one-use invitation.
+    """One SSH call: find agent-link, start its daemon if needed, issue a one-use invitation.
 
     The code arrives on this pipe and stays in memory: never printed, logged or put in argv/env.
     """
     argv = SSHTransport(alias, '/', ssh_config=ssh_config).argv()
     argv[-1] = remote_up_command(remote_path, host_name)
     result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
-    if 'agent-hub-not-found' in result.stderr:
-        raise SystemExit(f'agent-link is not installed on {alias} (no agent-hub on PATH or in ~/.local/bin). '
+    if 'agent-link-not-found' in result.stderr:
+        raise SystemExit(f'agent-link is not installed on {alias} (no agent-link on PATH or in ~/.local/bin). '
                          'On the server, in any folder, run:\n'
                          '  git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup.sh\n'
-                         'or, if it is already cloned, run ./setup.sh in that clone (it links agent-hub), '
+                         'or, if it is already cloned, run ./setup.sh in that clone (it links agent-link), '
                          'or pass --remote-path.')
     if result.returncode:
         raise SystemExit(f'{alias}: ' + explain_ssh_failure(result.stderr))
     try:
         return json.loads(result.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
-        raise SystemExit(f'{alias}: unexpected output from agent-hub up') from None
+        raise SystemExit(f'{alias}: unexpected output from agent-link up') from None
 
 
 async def one_shot(transport, frame):
@@ -156,7 +156,7 @@ async def add_host(args, store):
     if args.remote_path and not args.remote_path.startswith('/'):
         raise SystemExit('--remote-path must be an absolute path on the server')
     if any(record['alias'] == args.alias for record in store.hosts()):
-        raise SystemExit(f'{args.alias} is already registered (hubctl hosts); remove-host first to redo it')
+        raise SystemExit(f'{args.alias} is already registered (agent-link hub hosts); remove-host first to redo it')
     host_name = args.name or (args.alias if NAME.fullmatch(args.alias) else None)
     steps, options = preflight(args.alias, args.ssh_config)
     say(f'[1/4] {args.alias}: DNS {steps["dns"]}, TCP {steps["tcp"]}')
@@ -164,7 +164,7 @@ async def add_host(args, store):
         if not args.remote_path:
             raise SystemExit('--code needs --remote-path (no SSH shell is used to look it up)')
         remote = {'path': args.remote_path, 'host': None, 'started': None,
-                  'code': getpass.getpass('Invitation code from `agent-hub invite`: ')}
+                  'code': getpass.getpass('Invitation code from `agent-link invite` on the server: ')}
     else:
         remote = remote_up(args.admin_alias or args.alias, args.remote_path, host_name, args.ssh_config)
     remote_path = args.remote_path or remote['path']
@@ -241,34 +241,11 @@ def discover_hosts(args, store):
     return 0 if all(v == 'connected' for v in results.values()) else 1
 
 
-def hubctl(argv=None):
-    parser = argparse.ArgumentParser(prog='hubctl', description='agent-link hub on the local PC')
-    commands = parser.add_subparsers(dest='command', required=True)
-    serve = commands.add_parser('serve', help='Run the hub (keep it running, e.g. systemd --user)')
-    serve.add_argument('--socket', type=Path)
-    commands.add_parser('up', help='Start the hub in the background (systemd user service if possible)')
-    add = commands.add_parser('add-host', help='Connect a server by its SSH alias (from ~/.ssh/config)')
-    add.add_argument('alias')
-    add.add_argument('--name', help='Host name in agent IDs (default: the alias)')
-    add.add_argument('--remote-path', help='agent-hub on the server, if not found automatically')
-    add.add_argument('--remote-socket', help='Daemon socket on the server, if not the default')
-    add.add_argument('--admin-alias', help='SSH alias with shell access used only to issue the invitation')
-    add.add_argument('--code', action='store_true', help='Enter an invitation code by hand instead')
-    add.add_argument('--mode', choices=['stream', 'poll'], default='stream')
-    add.add_argument('--ssh-config')
-    discover = commands.add_parser('discover', help='Pick servers from ~/.ssh/config (Space to pick, Enter to apply)')
-    discover.add_argument('--ssh-config', help='SSH config to read (default ~/.ssh/config)')
-    discover.add_argument('--hosts', help='Comma-separated aliases instead of the interactive picker')
-    commands.add_parser('remove-host').add_argument('host')
-    commands.add_parser('hosts').add_argument('--pid', action='store_true', help='Print only the hub process ID')
-    agents = commands.add_parser('agents')
-    agents.add_argument('filter', nargs='?', default='')
-    log = commands.add_parser('log', help='Recent routed message metadata')
-    log.add_argument('--limit', type=int, default=20)
-    args = parser.parse_args(argv)
-
+def run_hub(args):
     root = private_directory(state_root() / 'hub')
     if args.command == 'up':
+        if args.restart and service.alive():
+            stop_running()
         emit({'hub': 'already running' if service.alive() else service.start('hub')})
         return 0
     if args.command == 'serve':
@@ -292,7 +269,7 @@ def hubctl(argv=None):
             asyncio.run(ask(default_socket(), 'reload'))
         except SystemExit:
             pass
-        emit({'removed': args.host, 'note': f'Also run `agent-hub revoke` on {args.host}; SSH keys are managed separately.'})
+        emit({'removed': args.host, 'note': f'Also run `agent-link revoke` on {args.host}; SSH keys are managed separately.'})
     elif args.command == 'hosts':
         reply = asyncio.run(ask(default_socket(), 'hosts'))
         print(reply['pid']) if args.pid else emit(reply['hosts'])
@@ -303,7 +280,7 @@ def hubctl(argv=None):
     return 0
 
 
-# ---- agent-hub ------------------------------------------------------------------------------
+# ---- server (spoke daemon) ------------------------------------------------------------------------------
 def configured_host_name():
     path = state_root() / 'config.toml'
     if not path.exists():
@@ -319,14 +296,17 @@ def daemon_host_name(store, flag=None):
     return configured_host_name() or store.paired_host() or flag or None
 
 
-def stop_daemon(wait=15):
-    """Stop the running daemon (systemd service or background process) and wait for its socket to close."""
-    pid = asyncio.run(ask(default_socket(), 'status'))['pid']
+def stop_running(wait=15):
+    """Stop what runs on this machine's socket (hub or daemon, systemd service or background process)."""
+    try:
+        pid = asyncio.run(ask(default_socket(), 'status'))['pid']
+    except ProtocolError:  # hubs before 0.5.6 do not answer status, but report their pid with hosts
+        pid = asyncio.run(ask(default_socket(), 'hosts'))['pid']
     os.kill(pid, signal.SIGTERM)
     deadline = time.monotonic() + wait
     while service.alive():
         if time.monotonic() > deadline:
-            raise SystemExit(f'agent-link daemon (pid {pid}) did not stop')
+            raise SystemExit(f'agent-link (pid {pid}) did not stop')
         time.sleep(0.1)
 
 
@@ -334,29 +314,7 @@ def spoke_store():
     return SpokeStore(private_directory(state_root() / 'spoke') / 'spoke.sqlite3')
 
 
-def agent_hub(argv=None):
-    parser = argparse.ArgumentParser(prog='agent-hub', description='agent-link spoke on a server')
-    commands = parser.add_subparsers(dest='command', required=True)
-    daemon = commands.add_parser('daemon', help='Run the spoke daemon (one per host)')
-    daemon.add_argument('--socket', type=Path)
-    daemon.add_argument('--host-name', help='Host name in agent IDs when config.toml has none and the server is '
-                        'not paired yet (default: short hostname)')
-    up = commands.add_parser('up', help='Start the daemon in the background if it is not running')
-    up.add_argument('--host-name', help='Host name in agent IDs at first pairing (config host_name and the '
-                    'paired name win)')
-    up.add_argument('--restart', action='store_true', help='Restart a running daemon (e.g. to take the paired name)')
-    up.add_argument('--invite', action='store_true', help='Also issue a one-use invitation (for hubctl add-host)')
-    up.add_argument('--json', action='store_true')
-    commands.add_parser('endpoint', help='SSH forced command').add_argument('--socket', type=Path)
-    invite = commands.add_parser('invite', help='Issue a one-use invitation code (5 minutes)')
-    invite.add_argument('--json', action='store_true', help='Machine output for hubctl add-host')
-    commands.add_parser('revoke', help='Delete the hub peer token and drop the hub connection')
-    commands.add_parser('status').add_argument('--socket', type=Path)
-    wait = commands.add_parser('wait-box', help='Wait until a mailbox folder has unread mail, print one line, exit')
-    wait.add_argument('--box', type=Path, required=True, help='The received/ folder shown by whoami')
-    wait.add_argument('--interval', type=float, default=2.0, help='Seconds between checks')
-    args = parser.parse_args(argv)
-
+def run_spoke(args):
     if args.command == 'wait-box':
         try:
             count, other = wait_for_mail(args.box, args.interval)
@@ -374,11 +332,11 @@ def agent_hub(argv=None):
     if args.command == 'up':
         how = None
         if args.restart and service.alive():
-            stop_daemon()
+            stop_running()
         if not service.alive():
             how = service.start('spoke', host_name=daemon_host_name(store, args.host_name))
         info = asyncio.run(ask(default_socket(), 'status'))
-        result = {'host': info['host'], 'path': service.executable('agent-hub'), 'started': how}
+        result = {'host': info['host'], 'path': service.executable('agent-link'), 'started': how}
         if args.invite:
             result['code'], result['expires'] = store.invite()
         if args.json:
@@ -407,9 +365,7 @@ def agent_hub(argv=None):
             asyncio.run(ask(default_socket(), 'drop_link'))
         except SystemExit:
             pass
-        emit({'revoked_tokens': removed, 'note': 'Also run `hubctl remove-host` on the hub.'})
-    elif args.command == 'status':
-        emit(asyncio.run(ask(args.socket or default_socket(), 'status')))
+        emit({'revoked_tokens': removed, 'note': 'Also run `agent-link hub remove-host` on the hub.'})
     return 0
 
 
@@ -427,38 +383,85 @@ async def status(spoke):
 
 
 def readable(info):
-    """Timestamps as local time for people reading `agent-hub status`."""
+    """Timestamps as local time for people reading `agent-link status`."""
     return {k: time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(v)) if k in ('enrolled_at', 'connected_since') else v
             for k, v in info.items()}
 
 
-def agent_link(argv=None):
-    """`agent-link status`: the same check on the local PC (hub) and on a server (spoke daemon)."""
-    parser = argparse.ArgumentParser(prog='agent-link', description='agent-link on this machine')
+def build_parser():
+    parser = argparse.ArgumentParser(prog='agent-link', description='agent-link: the hub on the local PC (agent-link hub ...) '
+                                     'and the daemon on each server')
     commands = parser.add_subparsers(dest='command', required=True)
-    commands.add_parser('status', help='Connection status: hub and its servers on the PC, the daemon on a server') \
+    commands.add_parser('status', help='Connection status: the hub and its servers on the PC, the daemon on a server') \
         .add_argument('--socket', type=Path)
-    args = parser.parse_args(argv)
-    socket_path = args.socket or default_socket()
+
+    # Server side: the spoke daemon.
+    up = commands.add_parser('up', help='Server: start the daemon in the background if it is not running')
+    up.add_argument('--host-name', help='Host name in agent IDs at first pairing (config host_name and the '
+                    'paired name win)')
+    up.add_argument('--restart', action='store_true', help='Restart a running daemon (e.g. to take the paired name)')
+    up.add_argument('--invite', action='store_true', help='Also issue a one-use invitation (for agent-link hub add-host)')
+    up.add_argument('--json', action='store_true')
+    daemon = commands.add_parser('daemon', help='Server: run the daemon in the foreground (what `up` starts)')
+    daemon.add_argument('--socket', type=Path)
+    daemon.add_argument('--host-name', help='Host name in agent IDs when config.toml has none and the server is '
+                        'not paired yet (default: short hostname)')
+    commands.add_parser('endpoint', help='Server: SSH forced command the hub runs').add_argument('--socket', type=Path)
+    invite = commands.add_parser('invite', help='Server: issue a one-use invitation code (5 minutes)')
+    invite.add_argument('--json', action='store_true', help='Machine output for agent-link hub add-host')
+    commands.add_parser('revoke', help='Server: delete the hub peer token and drop the hub connection')
+    wait = commands.add_parser('wait-box', help='Wait until a mailbox folder has unread mail, print one line, exit')
+    wait.add_argument('--box', type=Path, required=True, help='The received/ folder shown by whoami')
+    wait.add_argument('--interval', type=float, default=2.0, help='Seconds between checks')
+
+    # Local PC: the hub.
+    hub = commands.add_parser('hub', help='Local PC: the hub and the servers it connects to').add_subparsers(
+        dest='hub_command', required=True)
+    hub_up = hub.add_parser('up', help='Start the hub in the background (systemd user service if possible)')
+    hub_up.add_argument('--restart', action='store_true', help='Restart a running hub (e.g. after an update)')
+    hub.add_parser('serve', help='Run the hub in the foreground (what `hub up` starts)').add_argument('--socket', type=Path)
+    add = hub.add_parser('add-host', help='Connect a server by its SSH alias (from ~/.ssh/config)')
+    add.add_argument('alias')
+    add.add_argument('--name', help='Host name in agent IDs (default: the alias)')
+    add.add_argument('--remote-path', help='agent-link on the server, if not found automatically')
+    add.add_argument('--remote-socket', help='Daemon socket on the server, if not the default')
+    add.add_argument('--admin-alias', help='SSH alias with shell access used only to issue the invitation')
+    add.add_argument('--code', action='store_true', help='Enter an invitation code by hand instead')
+    add.add_argument('--mode', choices=['stream', 'poll'], default='stream')
+    add.add_argument('--ssh-config')
+    discover = hub.add_parser('discover', help='Pick servers from ~/.ssh/config (Space to pick, Enter to apply)')
+    discover.add_argument('--ssh-config', help='SSH config to read (default ~/.ssh/config)')
+    discover.add_argument('--hosts', help='Comma-separated aliases instead of the interactive picker')
+    hub.add_parser('remove-host').add_argument('host')
+    hub.add_parser('hosts').add_argument('--pid', action='store_true', help='Print only the hub process ID')
+    agents = hub.add_parser('agents')
+    agents.add_argument('filter', nargs='?', default='')
+    log = hub.add_parser('log', help='Recent routed message metadata')
+    log.add_argument('--limit', type=int, default=20)
+    return parser
+
+
+def show_status(socket_path):
     if not service.alive(socket_path):
         raise SystemExit('agent-link is not running on this machine. '
-                         'Local PC: `hubctl up` (or `hubctl add-host <alias>`); server: `agent-hub up`.')
+                         'Local PC: `agent-link hub up` (or `agent-link hub add-host <alias>`); server: `agent-link up`.')
     try:
         emit(asyncio.run(ask(socket_path, 'status')))
     except ProtocolError as error:
         raise SystemExit(f'The running hub/daemon does not answer status ({error.code}); it is an older version. '
-                         'Restart it: `systemctl --user restart agent-link-hub` (PC) or '
-                         '`systemctl --user restart agent-link-spoke` (server).') from None
+                         'Restart it: `agent-link hub up --restart` (PC) or `agent-link up --restart` (server).') from None
     return 0
 
 
-def agent_link_main():
+def agent_link(argv=None):
+    args = build_parser().parse_args(argv)
+    if args.command == 'status':
+        return show_status(args.socket or default_socket())
+    if args.command == 'hub':
+        args.command = args.hub_command
+        return run_hub(args)
+    return run_spoke(args)
+
+
+def main():
     sys.exit(agent_link())
-
-
-def hubctl_main():
-    sys.exit(hubctl())
-
-
-def agent_hub_main():
-    sys.exit(agent_hub())

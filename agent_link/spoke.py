@@ -195,7 +195,7 @@ class Agent:
 
 
 class Conn:
-    """One adapter (or hubctl) connection. Requests in both directions are correlated by `rid`."""
+    """One adapter (or `agent-link` CLI) connection. Requests in both directions are correlated by `rid`."""
 
     _ids = itertools.count(1)
 
@@ -558,9 +558,9 @@ class LinkSession:
                 paired = record['paired_as'] = expected
             if paired and paired != spoke.host:
                 raise ProtocolError('host_mismatch', f'this daemon runs as "{spoke.host}" but was paired with the hub '
-                                    f'as "{paired}". On this server run `agent-hub up --restart` (it uses the paired '
-                                    'name unless config.toml sets host_name), or pair again: hubctl remove-host, '
-                                    'then hubctl add-host')
+                                    f'as "{paired}". On this server run `agent-link up --restart` (it uses the paired '
+                                    'name unless config.toml sets host_name), or pair again: agent-link hub remove-host, '
+                                    'then agent-link hub add-host')
             # The name/user the hub reports now wins over the one recorded at enrollment.
             self.info = {**record, **hub_identity(first.get('hub')), 'from': peer(first),
                          'connected_since': time.time()}

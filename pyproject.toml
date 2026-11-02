@@ -4,16 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-link"
-version = "0.5.7"
+version = "0.6.0"
 description = "Hub-and-spoke messaging between Claude Code and Codex sessions on many servers"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 dependencies = ["mcp>=1.20,<2"]
 
 [project.scripts]
-hubctl = "agent_link.cli:hubctl_main"
-agent-hub = "agent_link.cli:agent_hub_main"
-agent-link = "agent_link.cli:agent_link_main"
+agent-link = "agent_link.cli:main"
 agent-link-mcp = "agent_link.mcp_adapter:main"
 
 [tool.setuptools.packages.find]

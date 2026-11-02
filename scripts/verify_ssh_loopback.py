@@ -74,13 +74,13 @@ def main():
             f'Host loop\n  HostName 127.0.0.1\n  Port {port}\n  User {getpass.getuser()}\n'
             f'  IdentityFile {root / "client"}\n  IdentitiesOnly yes\n  UserKnownHostsFile {root / "known_hosts"}\n')
         server_env = {'AGENT_HUB_STATE': str(root / 'server-state'), 'AGENT_HUB_BOX': str(root / 'server-box')}
-        wrapper = root / 'agent-hub'
+        wrapper = root / 'agent-link'
         wrapper.write_text('#!/bin/sh\n' + ''.join(f'export {k}={shlex.quote(v)}\n' for k, v in server_env.items())
                            + f'cd {shlex.quote(str(Path(__file__).resolve().parents[1]))}\n'
-                           + f'exec {shlex.quote(sys.executable)} -m agent_link agent-hub "$@"\n')
+                           + f'exec {shlex.quote(sys.executable)} -m agent_link "$@"\n')
         wrapper.chmod(0o700)
         hub_env = {**os.environ, 'AGENT_HUB_STATE': str(root / 'hub-state'), 'AGENT_HUB_BOX': str(root / 'hub-box')}
-        hubctl = [sys.executable, '-m', 'agent_link', 'hubctl']
+        hub_cli = [sys.executable, '-m', 'agent_link', 'hub']
         try:
             processes.append(subprocess.Popen([sshd, '-D', '-e', '-f', str(root / 'sshd.conf')],
                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
@@ -93,9 +93,9 @@ def main():
                     break
                 except OSError:
                     time.sleep(0.1)
-            added = subprocess.run(hubctl + ['add-host', 'loop', '--remote-path', str(wrapper), '--ssh-config',
+            added = subprocess.run(hub_cli + ['add-host', 'loop', '--remote-path', str(wrapper), '--ssh-config',
                                              str(root / 'ssh.conf')], env=hub_env, capture_output=True, text=True, timeout=60)
-            hosts_output = subprocess.run(hubctl + ['hosts'], env=hub_env, capture_output=True, text=True, timeout=20)
+            hosts_output = subprocess.run(hub_cli + ['hosts'], env=hub_env, capture_output=True, text=True, timeout=20)
             if added.returncode:
                 raise SystemExit('add-host failed: ' + added.stderr[-1500:])
             assert '[4/4] hub started and connected to loopback-srv' in added.stdout, added.stdout
@@ -110,7 +110,7 @@ def main():
                               'system_ssh_modified': False}, ensure_ascii=False))
         finally:
             # add-host started the hub detached; stop it through the pid it reports.
-            reply = subprocess.run(hubctl + ['hosts', '--pid'], env=hub_env, capture_output=True, text=True, timeout=20)
+            reply = subprocess.run(hub_cli + ['hosts', '--pid'], env=hub_env, capture_output=True, text=True, timeout=20)
             if reply.returncode == 0 and reply.stdout.strip().isdigit():
                 os.kill(int(reply.stdout.strip()), 15)
             for process in reversed(processes):

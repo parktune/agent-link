@@ -11,21 +11,21 @@ git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup
 `setup.sh`가 하는 일은 다음과 같습니다.
 - Python 3.11 이상으로 `.venv`를 만들고 패키지를 설치합니다. 시스템에 없으면 uv가 있을 때 uv로 받습니다.
 - Claude Code·Codex에 스킬과 MCP 서버를 등록합니다.
-- `~/.local/bin`에 `hubctl`, `agent-hub`를 링크합니다.
+- `~/.local/bin`에 `agent-link hub`, `agent-link`를 링크합니다.
 
-업데이트할 때는 clone한 폴더에서 `git pull && ./setup.sh`를 실행합니다.
+업데이트할 때는 clone한 폴더에서 `git pull && ./setup.sh`를 실행합니다. 0.5.x에서 0.6.0으로 올릴 때는 서버를 먼저 올립니다([운영 가이드](docs/operations.md#060으로-올릴-때-hubctl-agent-hub--agent-link)).
 
 **2. 로컬 PC에서** 서버를 연결합니다. 고르는 방식과 직접 지정하는 방식이 있습니다.
 
 ```bash
-hubctl discover           # ~/.ssh/config 호스트 목록에서 Space로 고르고 Enter로 확정
-hubctl add-host gpu-server-1   # 또는 alias를 직접 지정
+agent-link hub discover           # ~/.ssh/config 호스트 목록에서 Space로 고르고 Enter로 확정
+agent-link hub add-host gpu-server-1   # 또는 alias를 직접 지정
 ```
 
 `discover`는 이미 등록된 서버를 `[=] (등록됨)`으로 표시합니다. 확정하면 고른 서버마다 아래 `add-host` 과정을 차례로 실행하고 결과를 요약합니다. 터미널이 아닌 곳에서는 `--hosts gpu-server-1,gpu-server-2`으로 지정합니다.
 
 이 한 줄이 SSH로 서버에 들어가 다음을 모두 처리합니다.
-- `agent-hub`를 찾습니다. 서버의 `setup.sh`가 만든 `~/.local/bin/agent-hub` 링크나 PATH로 찾으므로 clone 위치는 상관없습니다.
+- `agent-link`를 찾습니다. 서버의 `setup.sh`가 만든 `~/.local/bin/agent-link` 링크나 PATH로 찾으므로 clone 위치는 상관없습니다.
 - 서버 daemon이 꺼져 있으면 띄웁니다(systemd user 서비스, 안 되면 백그라운드).
 - 1회용 초대로 호스트 토큰을 등록합니다.
 - 로컬 hub가 꺼져 있으면 띄우고 연결까지 확인합니다.
@@ -43,7 +43,7 @@ agent-link status      # 로컬 PC와 서버 어디서든 연결 상태 확인
 
 - 로컬 PC에서는 hub 상태를 보여 줍니다. 서버별 연결 여부(`hosts_connected`, `hosts`)와 전체 세션 목록이 나옵니다.
 - 서버에서는 daemon 상태를 보여 줍니다. hub 연결 여부, 연결된 hub의 이름·접속 주소, 그 서버의 세션 목록이 나옵니다.
-- 더 자세히 보려면 로컬 PC에서 `hubctl hosts`, `hubctl agents`, `hubctl log`를 씁니다.
+- 더 자세히 보려면 로컬 PC에서 `agent-link hub hosts`, `agent-link hub agents`, `agent-link hub log`를 씁니다.
 
 ## 사용법
 
@@ -68,7 +68,7 @@ $agent-link trainer 체크포인트 경로 알려줘
   - Claude: `claude --dangerously-load-development-channels server:agent-link`로 시작한 세션이어야 합니다. 플래그 없이 연 세션에서 `/agent-link:register`를 쓰면, 그 세션을 나간 뒤 실행할 명령을 알려 줍니다. 세션 폴더로 이동해 원래 플래그를 그대로 두고 채널 플래그를 더해 `--resume <세션 이름>`으로 다시 엽니다(예: `cd /home/me && claude --dangerously-load-development-channels server:agent-link --resume project-head`).
   - Codex: 스레드 ID 또는 `/rename` 이름으로 등록한 세션이어야 합니다(`codex queue`).
 - 바로 넣을 수 없으면 박스에 저장합니다. 세션이 닫혀 있거나, push가 안 되는 세션이거나, push가 실패한 경우입니다.
-  - 플래그 없이 연 Claude 세션은 등록할 때(또는 첫 `/agent-link`) 박스 감시를 백그라운드로 겁니다(`agent-hub wait-box`). 메시지가 박스에 들어오면 몇 초 안에 세션이 깨어나 읽습니다. 세션이 열려 있는 동안만 동작합니다. `/agent-link:settings watch off`로 끄면 그 이름에는 다시 걸지 않고, `watch on`으로 다시 켭니다.
+  - 플래그 없이 연 Claude 세션은 등록할 때(또는 첫 `/agent-link`) 박스 감시를 백그라운드로 겁니다(`agent-link wait-box`). 메시지가 박스에 들어오면 몇 초 안에 세션이 깨어나 읽습니다. 세션이 열려 있는 동안만 동작합니다. `/agent-link:settings watch off`로 끄면 그 이름에는 다시 걸지 않고, `watch on`으로 다시 켭니다.
   - 로컬 PC: `<repo>/hub/<tool>-<name>/received/*.md`
   - 서버: `<repo>/spoke/<tool>-<name>/received/*.md`
   - 메시지 1건이 Markdown 파일 1개입니다. `/agent-link`로 확인하면 `received/read/`로 옮깁니다.
@@ -79,8 +79,8 @@ $agent-link trainer 체크포인트 경로 알려줘
 서로 다른 구독 계정의 세션도 함께 쓸 수 있습니다. 로컬 PC의 hub가 SSH로 각 서버에 붙는 hub-and-spoke 구조입니다.
 
 ```
-[로컬 PC]  Claude/Codex 세션 ── hubctl serve (hub) ──SSH──┬── [서버 A] agent-hub daemon ── 세션들
-                                                          └── [서버 B] agent-hub daemon ── 세션들
+[로컬 PC]  Claude/Codex 세션 ── agent-link hub serve (hub) ──SSH──┬── [서버 A] agent-link daemon ── 세션들
+                                                          └── [서버 B] agent-link daemon ── 세션들
 ```
 
 ## 상태

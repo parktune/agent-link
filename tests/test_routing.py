@@ -235,7 +235,7 @@ class HubTests(Environment):
 class EndpointSecurityTests(Environment):
     async def endpoint(self, frames):
         process = await asyncio.create_subprocess_exec(
-            __import__('sys').executable, '-m', 'agent_link', 'agent-hub', 'endpoint', '--socket',
+            __import__('sys').executable, '-m', 'agent_link', 'endpoint', '--socket',
             str(self.root / 'gpu1' / 's.sock'), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
         for frame in frames:
             process.stdin.write(encode(frame))
@@ -261,7 +261,7 @@ class EndpointSecurityTests(Environment):
         await self.server('gpu1')
         token = self.enroll('gpu1')
         process = await asyncio.create_subprocess_exec(
-            __import__('sys').executable, '-m', 'agent_link', 'agent-hub', 'endpoint', '--socket',
+            __import__('sys').executable, '-m', 'agent_link', 'endpoint', '--socket',
             str(self.root / 'gpu1' / 's.sock'), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
         process.stdin.write(encode({'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token}))
         process.stdin.write(encode({'op': 'exec', 'command': 'id'}))
@@ -291,7 +291,7 @@ class HubIdentityTests(Environment):
         import os, sys
         env = {**os.environ, 'SSH_CONNECTION': ssh_connection}
         process = await asyncio.create_subprocess_exec(
-            sys.executable, '-m', 'agent_link', 'agent-hub', 'endpoint', '--socket', str(self.root / 'gpu1' / 's.sock'),
+            sys.executable, '-m', 'agent_link', 'endpoint', '--socket', str(self.root / 'gpu1' / 's.sock'),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, env=env)
         for frame in frames:
             process.stdin.write(encode(frame))
@@ -347,13 +347,13 @@ class PairedNameTests(Environment):
         self.assertEqual(spoke.store.paired_host(), 'gpu1')
         from agent_link import cli
         with tempfile.TemporaryDirectory() as state, mock.patch.dict(os.environ, {'AGENT_HUB_STATE': state}):
-            # `agent-hub up` without a name (or with the hostname) still comes back as the paired name.
+            # `agent-link up` without a name (or with the hostname) still comes back as the paired name.
             self.assertEqual(cli.daemon_host_name(spoke.store, 'gpu58'), 'gpu1')
             Path(state, 'config.toml').write_text('host_name = "chosen"\n')
             self.assertEqual(cli.daemon_host_name(spoke.store, 'gpu58'), 'chosen')  # an explicit setting wins
         fresh = await self.server('gpu2')
         with tempfile.TemporaryDirectory() as state, mock.patch.dict(os.environ, {'AGENT_HUB_STATE': state}):
-            self.assertEqual(cli.daemon_host_name(fresh.store, 'gpu-vlm'), 'gpu-vlm')  # first pairing: the hub's name
+            self.assertEqual(cli.daemon_host_name(fresh.store, 'gpu-server-2'), 'gpu-server-2')  # first pairing: the hub's name
             self.assertIsNone(cli.daemon_host_name(fresh.store))  # nothing at all: the short hostname
 
     async def test_a_token_from_before_0_5_7_learns_the_name_from_the_hub(self):
@@ -368,23 +368,23 @@ class PairedNameTests(Environment):
         await process.wait()
 
     async def test_a_daemon_under_another_name_explains_how_to_fix_it(self):
-        spoke = await self.server('gpu1')  # restarted under its hostname after pairing as gpu-vlm
+        spoke = await self.server('gpu1')  # restarted under its hostname after pairing as gpu-server-2
         code, _ = spoke.store.invite()
-        spoke.store.enroll(code, 'T' * 43, host='gpu-vlm')
+        spoke.store.enroll(code, 'T' * 43, host='gpu-server-2')
         process, reply = await self.endpoint_session(
-            [{'op': 'hello', 'v': PROTOCOL_VERSION, 'token': 'T' * 43, 'host': 'gpu-vlm'}], '')
+            [{'op': 'hello', 'v': PROTOCOL_VERSION, 'token': 'T' * 43, 'host': 'gpu-server-2'}], '')
         self.assertEqual(reply['code'], 'host_mismatch')
-        self.assertIn('runs as "gpu1" but was paired with the hub as "gpu-vlm"', reply['detail'])
-        self.assertIn('agent-hub up --restart', reply['detail'])
+        self.assertIn('runs as "gpu1" but was paired with the hub as "gpu-server-2"', reply['detail'])
+        self.assertIn('agent-link up --restart', reply['detail'])
         self.assertIsNone(spoke.link)
         await process.wait()
 
     def test_the_hub_names_a_mismatch_from_an_older_server(self):
         from agent_link.hub import HostLink
         link = HostLink.__new__(HostLink)
-        link.name = 'gpu-vlm'
-        link.check_hello({'op': 'hello_ok', 'host': 'gpu-vlm'})
-        with self.assertRaisesRegex(ProtocolError, 'host_mismatch.*"gpu58".*"gpu-vlm"'):
+        link.name = 'gpu-server-2'
+        link.check_hello({'op': 'hello_ok', 'host': 'gpu-server-2'})
+        with self.assertRaisesRegex(ProtocolError, 'host_mismatch.*"gpu58".*"gpu-server-2"'):
             link.check_hello({'op': 'hello_ok', 'host': 'gpu58'})
         with self.assertRaisesRegex(ProtocolError, 'unauthorized'):
             link.check_hello({'op': 'error'})

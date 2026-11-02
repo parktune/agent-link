@@ -18,7 +18,7 @@ Layout:
 | `agent_link/endpoint.py` | SSH forced-command relay with the frame allowlist |
 | `agent_link/box.py` | Mailbox folders |
 | `agent_link/mcp_adapter.py`, `inject.py`, `client.py` | Session adapter (MCP server) and push into Claude/Codex |
-| `agent_link/cli.py` | `hubctl`, `agent-hub` |
+| `agent_link/cli.py` | `agent-link hub`, `agent-link` |
 | `skills/agent-link/SKILL.md` | Standalone `/agent-link` (`$agent-link`) skill: send and read messages. Copied by `scripts/install.py` |
 | `plugin/` | Plugin for Claude Code and Codex with the `agent-link:register` (register, restart command with the channel flag) and `agent-link:settings` (withdraw, rename, mailbox watch) skills. `.claude-plugin/marketplace.json` at the repo root lists it so only this folder is installed |
 

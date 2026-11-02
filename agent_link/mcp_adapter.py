@@ -116,7 +116,7 @@ class Adapter:
             return None
         box = self.identity['box']
         return {'enabled': watch_enabled(box), 'running_pid': waiter_alive(box),
-                'command': shlex.join([sys.executable, '-m', 'agent_link', 'agent-hub', 'wait-box', '--box', box])}
+                'command': shlex.join([sys.executable, '-m', 'agent_link', 'wait-box', '--box', box])}
 
     def restart(self, name=None):
         """How to reopen this Claude session with push: exit it, then run `command` (resume by session name).

@@ -1,4 +1,4 @@
-"""Alias-only add-host: finding agent-hub on the server and starting daemons on demand."""
+"""Alias-only add-host: finding agent-link on the server and starting daemons on demand."""
 import json
 import os
 from pathlib import Path
@@ -18,7 +18,7 @@ class DiscoveryTests(unittest.TestCase):
         return subprocess.run(['sh', '-c', command], env=env, capture_output=True, text=True, timeout=10)
 
     def clone(self, folder):
-        target = Path(folder, '.venv/bin/agent-hub')
+        target = Path(folder, '.venv/bin/agent-link')
         target.parent.mkdir(parents=True)
         target.write_text('#!/bin/sh\necho "$0" "$@"\n')
         target.chmod(0o755)
@@ -27,7 +27,7 @@ class DiscoveryTests(unittest.TestCase):
     def test_finds_a_clone_anywhere_through_the_setup_link(self):
         with tempfile.TemporaryDirectory() as home:
             target = self.clone(Path(home, 'some/place/agent-link'))
-            link = Path(home, '.local/bin/agent-hub')
+            link = Path(home, '.local/bin/agent-link')
             link.parent.mkdir(parents=True)
             link.symlink_to(target)
             result = self.run_remote(home, remote_up_command(None, 'gpu-server-1'))
@@ -44,18 +44,18 @@ class DiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as home:
             result = self.run_remote(home, remote_up_command(None, None))
             self.assertEqual(result.returncode, 3)
-            self.assertIn('agent-hub-not-found', result.stderr)
+            self.assertIn('agent-link-not-found', result.stderr)
 
     def test_explicit_path_is_quoted(self):
-        self.assertEqual(remote_up_command('/opt/a b/agent-hub', 'x'),
-                         "'/opt/a b/agent-hub' up --json --invite --host-name x")
+        self.assertEqual(remote_up_command('/opt/a b/agent-link', 'x'),
+                         "'/opt/a b/agent-link' up --json --invite --host-name x")
 
 
 class UpTests(unittest.TestCase):
     def test_up_starts_a_background_daemon_once_and_issues_an_invitation(self):
         with tempfile.TemporaryDirectory(prefix='al-') as state:
             env = {**os.environ, 'AGENT_HUB_STATE': state, 'AGENT_HUB_BOX': state + '/box'}
-            command = [sys.executable, '-m', 'agent_link', 'agent-hub', 'up', '--json', '--invite', '--host-name', 'gpu-server-1']
+            command = [sys.executable, '-m', 'agent_link', 'up', '--json', '--invite', '--host-name', 'gpu-server-1']
             first = json.loads(subprocess.run(command, env=env, capture_output=True, text=True, timeout=30, check=True).stdout)
             try:
                 self.assertEqual((first['host'], first['started']), ('gpu-server-1', 'background'))
@@ -64,11 +64,11 @@ class UpTests(unittest.TestCase):
                                                    check=True).stdout)
                 self.assertIsNone(second['started'])
                 self.assertEqual(second['host'], 'gpu-server-1')
-                status = json.loads(subprocess.run([sys.executable, '-m', 'agent_link', 'agent-link', 'status'], env=env,
+                status = json.loads(subprocess.run([sys.executable, '-m', 'agent_link', 'status'], env=env,
                                                    capture_output=True, text=True, timeout=30, check=True).stdout)
                 self.assertEqual((status['role'], status['host'], status['hub_connected']), ('spoke', 'gpu-server-1', False))
             finally:
-                status = subprocess.run([sys.executable, '-m', 'agent_link', 'agent-hub', 'status'], env=env,
+                status = subprocess.run([sys.executable, '-m', 'agent_link', 'status'], env=env,
                                         capture_output=True, text=True, timeout=30)
                 os.kill(json.loads(status.stdout)['pid'], signal.SIGTERM)
                 time.sleep(0.2)
@@ -78,7 +78,22 @@ class StatusCommandTests(unittest.TestCase):
     def test_agent_link_status_explains_when_nothing_runs(self):
         with tempfile.TemporaryDirectory(prefix='al-') as state:
             env = {**os.environ, 'AGENT_HUB_STATE': state}
-            result = subprocess.run([sys.executable, '-m', 'agent_link', 'agent-link', 'status'], env=env,
+            result = subprocess.run([sys.executable, '-m', 'agent_link', 'status'], env=env,
                                     capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 1)
             self.assertIn('not running on this machine', result.stderr)
+
+
+class RenameMigrationTests(unittest.TestCase):
+    def test_hosts_paired_with_agent_hub_now_run_agent_link(self):
+        from agent_link.hub import HubStore
+        with tempfile.TemporaryDirectory() as root:
+            store = HubStore(Path(root, 'hub.sqlite3'))
+            store.add_host('gpu-server-1', 'gpu-server-1', '/srv/x/agent-link/.venv/bin/agent-hub', 't' * 43)
+            store.add_host('gpu-server-2', 'gpu-server-2', '/opt/custom/agent-link', 't' * 43)
+            store.db.close()
+            store = HubStore(Path(root, 'hub.sqlite3'))
+            self.assertEqual({h['name']: h['remote_path'] for h in store.hosts()},
+                             {'gpu-server-1': '/srv/x/agent-link/.venv/bin/agent-link',
+                              'gpu-server-2': '/opt/custom/agent-link'})
+            store.db.close()

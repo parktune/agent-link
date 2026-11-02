@@ -9,7 +9,7 @@ Registers this session with the agent-link daemon on this machine (the hub on th
 
 ## 1. Check the daemon
 
-Call `whoami`. If `daemon_connected` is false, the hub (`hubctl serve`, user's PC) or spoke daemon (`agent-hub daemon`, server) is not running. Say so and stop; do not start it yourself.
+Call `whoami`. If `daemon_connected` is false, the hub (`agent-link hub serve`, user's PC) or spoke daemon (`agent-link daemon`, server) is not running. Say so and stop; do not start it yourself.
 
 ## 2. Pick the name
 

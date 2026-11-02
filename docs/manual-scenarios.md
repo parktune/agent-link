@@ -7,7 +7,7 @@
 
 | ID | 확인 | 방법 | 기대 |
 |---|---|---|---|
-| M0-1 | Claude channel 주입 | 로컬에서 `hubctl serve`를 실행한다. 터미널 A에서 `claude --dangerously-load-development-channels server:agent-link`를 열고 `/agent-link:register main`, 터미널 B에서 일반 `claude`를 열고 `/agent-link:register other` 후 `/agent-link main 안녕` | A 화면에 `← agent-link: 안녕`이 나타나고 A가 응답한다. `whoami`의 `push.available=true` |
+| M0-1 | Claude channel 주입 | 로컬에서 `agent-link hub serve`를 실행한다. 터미널 A에서 `claude --dangerously-load-development-channels server:agent-link`를 열고 `/agent-link:register main`, 터미널 B에서 일반 `claude`를 열고 `/agent-link:register other` 후 `/agent-link main 안녕` | A 화면에 `← agent-link: 안녕`이 나타나고 A가 응답한다. `whoami`의 `push.available=true` |
 | M0-2 | 플래그 없는 Claude | M0-1의 B 세션(플래그 없음)으로 보낸다 | `stored`, `<repo>/hub/claude-other/received/`에 파일이 생긴다. 등록할 때 건 감시가 끝나며 B가 깨어나 메시지를 읽고 감시를 다시 건다 |
 | M0-2b | 플래그 붙여 다시 열기 | `/rename other`한 B에서 `/agent-link:register`가 알려 준 명령을 B를 나간 뒤 실행한다 | 같은 대화가 다시 열리고, 원래 플래그가 유지된다. `/agent-link:settings`에서 같은 ID, `push.available=true` |
 | M0-2a | 감시 끄기·켜기·철회 | B에서 `/agent-link:settings watch off` 후 다시 B로 보내고, `watch on` 후 한 번 더 보낸다. 끝으로 `/agent-link:settings unregister` | off 동안은 박스에만 쌓이고 B가 깨지 않는다. on 하면 감시가 다시 걸리고 쌓인 메시지부터 읽는다. 철회 후 B로 보내면 `not_found`이고 `/agent-link`가 B를 다시 등록하지 않는다 |
@@ -24,17 +24,17 @@
 | S2 | 같은 서버 Claude 2개 | `test_s2_s10...` | 지정한 세션에만 도착한다 |
 | S3 | 같은 서버, 다른 계정 | 없음 | 서로 다른 구독 계정으로 로그인한 두 Claude를 같은 OS 사용자로 연다. 하나의 daemon으로 동작한다. 다른 OS 사용자면 `socket_group` 구성이 필요하다(15장 3번) |
 | S4 | Codex 대상 S1 | 어댑터 테스트 | M0-4 확인 후 수행 |
-| S5 | 세션 종료 후 전송 | `test_s5_s17...` | 오류 대신 `stored_offline`이고 박스에 저장된다(ADR 0003). `hubctl agents`에 offline으로 표시된다 |
-| S6 | 한 호스트 단절 | `test_s6...` | 서버 하나의 네트워크를 끊는다. `hubctl hosts`에서 그 호스트만 백오프하고 복구 후 재연결된다 |
+| S5 | 세션 종료 후 전송 | `test_s5_s17...` | 오류 대신 `stored_offline`이고 박스에 저장된다(ADR 0003). `agent-link hub agents`에 offline으로 표시된다 |
+| S6 | 한 호스트 단절 | `test_s6...` | 서버 하나의 네트워크를 끊는다. `agent-link hub hosts`에서 그 호스트만 백오프하고 복구 후 재연결된다 |
 | S7 | hub 재시작·절전 복귀 | `test_s7_s16...` | hub를 끈 사이 서버 세션이 회신(`queued`). hub를 켜면 한 번만 도착한다 |
 | S8 | 부하 50대 | 미구현(M4) | |
 | S9 | reply에 다시 회신, hop 초과 | `test_s9_*` | 서버 세션에 "받은 회신에 다시 답해"라고 시킨다. `reply_to_reply`로 거부된다 |
 | S10 | 같은 호스트 두 세션(`allow_origination=host`), hub 중단 | `test_s2_s10...` | hub를 끈 상태에서 같은 서버의 두 세션 사이 전송이 된다 |
 | S11 | 호스트 생략 이름이 로컬에 없음 | `test_s11...` | hub로 올라가 다른 호스트로 간다 |
 | S12 | 자기 호스트 명시 + 없음, 동명 2개 | `test_s12...` | `not_found`, `ambiguous` |
-| S13 | `mirror_local_metadata` | `test_s13...` | `hubctl log`에 본문 없이 기록된다 |
+| S13 | `mirror_local_metadata` | `test_s13...` | `agent-link hub log`에 본문 없이 기록된다 |
 | S14 | add-host 실패 경로 | `test_s14...` | known_hosts에서 서버 키를 빼고 add-host를 실행한다. host key 오류로 중단된다 |
-| S15 | 토큰 없음·오류·revoke·허용 외 프레임 | `test_s15_*` | `agent-hub revoke` 후 `hubctl hosts`에 `unauthorized` |
+| S15 | 토큰 없음·오류·revoke·허용 외 프레임 | `test_s15_*` | `agent-link revoke` 후 `agent-link hub hosts`에 `unauthorized` |
 | S16 | 스트림 끊김 후 재연결 | `test_s7_s16...` | |
 | S17 | 박스 세션으로 전송 | `test_s5_s17...` | `stored`, `check_box`로 읽힌다 |
 

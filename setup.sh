@@ -40,10 +40,22 @@ echo "[2/4] installed agent-link $(.venv/bin/python -c 'import agent_link; print
 echo "[3/4] installed /agent-link, the agent-link:register/settings plugin and the MCP server"
 
 mkdir -p "$HOME/.local/bin"
-for command in agent-link hubctl agent-hub; do
-    ln -sf "$REPO/.venv/bin/$command" "$HOME/.local/bin/$command"
+ln -sf "$REPO/.venv/bin/agent-link" "$HOME/.local/bin/agent-link"
+# hubctl and agent-hub became `agent-link hub ...` and `agent-link ...` in 0.6.0: drop their old links.
+for old in hubctl agent-hub; do
+    case "$(readlink "$HOME/.local/bin/$old" 2>/dev/null)" in
+        "$REPO"/*) rm -f "$HOME/.local/bin/$old" ;;
+    esac
 done
-echo "[4/4] linked agent-link, hubctl and agent-hub into ~/.local/bin"
+echo "[4/4] linked agent-link into ~/.local/bin"
+# Services written before 0.6.0 run commands that no longer exist: rewrite them and restart.
+units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
+if grep -qs 'hubctl serve' "$units/agent-link-hub.service"; then
+    .venv/bin/agent-link hub up --restart >/dev/null && echo "      moved the hub service to agent-link hub serve"
+fi
+if grep -qs 'agent-hub daemon' "$units/agent-link-spoke.service"; then
+    .venv/bin/agent-link up --restart >/dev/null && echo "      moved the server daemon service to agent-link daemon"
+fi
 case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
     *) echo "      note: add ~/.local/bin to PATH (e.g. in ~/.bashrc) to run them by name" ;;
@@ -53,7 +65,7 @@ cat <<'EOF'
 
 Next:
   server   : nothing else. The hub starts this server's daemon when it connects.
-  local PC : hubctl discover   (pick servers from ~/.ssh/config)  or  hubctl add-host <ssh-alias>
+  local PC : agent-link hub discover   (pick servers from ~/.ssh/config)  or  agent-link hub add-host <ssh-alias>
 Then open Claude with  claude --dangerously-load-development-channels server:agent-link
 and use /agent-link:register to register the session, /agent-link to message others
 (Codex: $agent-link:register, $agent-link).

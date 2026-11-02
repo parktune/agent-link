@@ -30,8 +30,8 @@ def executable(name):
 
 def daemon_argv(kind, host_name=None):
     if kind == 'hub':
-        return [executable('hubctl'), 'serve']
-    return [executable('agent-hub'), 'daemon'] + (['--host-name', host_name] if host_name else [])
+        return [executable('agent-link'), 'hub', 'serve']
+    return [executable('agent-link'), 'daemon'] + (['--host-name', host_name] if host_name else [])
 
 
 def _systemd(kind, argv):

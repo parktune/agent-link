@@ -13,7 +13,7 @@ The user's text after the command is usually `<agent> <message>`. With no text, 
 
 Call `whoami`.
 
-- `daemon_connected` false: the hub (`hubctl serve`, user's PC) or spoke daemon (`agent-hub daemon`, server) is not running. Say so and stop; do not start it yourself.
+- `daemon_connected` false: the hub (`agent-link hub serve`, user's PC) or spoke daemon (`agent-link daemon`, server) is not running. Say so and stop; do not start it yourself.
 - `registered` false and `withdrawn` true: the user withdrew this session with `agent-link:settings`. Do not register it again; say so and suggest `/agent-link:register`. Sending and the mailbox need a registration.
 - `registered` false otherwise: register quietly under the session's own name and go on.
   - Claude: if `whoami` shows a valid `session_name` (set with `/rename`), call `register()` with no arguments.
