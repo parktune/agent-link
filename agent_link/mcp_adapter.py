@@ -236,7 +236,7 @@ TOOLS = [
      'Never invent a name. Codex: pass thread_id (CODEX_THREAD_ID or the /rename session name) to enable push.',
      {'name': {'type': 'string'}, 'thread_id': {'type': 'string'}}, []),
     ('list_agents', 'List agent sessions known to agent-link (ID host:tool:name, status, delivery). '
-     'On the local PC this covers every host; on a server only that host.',
+     'Covers every host: a server learns the other hosts\' agents from the hub while it is connected.',
      {'filter': {'type': 'string'}}, []),
     ('send_message', 'Send a message to another agent and return immediately with its message_id and status '
      '(delivered = pushed into the open session, stored/stored_offline = saved to its mailbox, queued = hub not '

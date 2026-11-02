@@ -24,6 +24,7 @@
 | hub → host | `ack {seq, result?}` | outbox를 `seq`까지 처리했다는 뜻이다. `result`는 그 메시지의 라우팅 결과(`{id, status}` 또는 `{id, error}`)이며, 기다리고 있는 보낸 세션에 전달한다 |
 | hub → host | `exchange {after, deliver[]}` | poll 모드. 응답 `exchange_ok {results, outbox, presence}` |
 | hub → host | `ping` | 응답 `pong` (명세 추가 사항) |
+| hub → host | `directory {agents[]}` | 다른 호스트의 에이전트 목록(id, host, tool, name, status, delivery). 바뀔 때 보낸다. `hello_ok`의 `caps`에 `directory`가 있는 서버에만 보낸다 (명세 추가 사항, 0.6.5) |
 | host → hub | `outbox {seq, msg}` / `outbox {seq, meta}` | 세션이 hub로 올린 메시지, 또는 같은 호스트 안에서 전달한 메시지의 메타데이터(본문 없음) |
 | host → hub | `presence {agents[]}` | 변화가 있을 때와 30초마다 |
 

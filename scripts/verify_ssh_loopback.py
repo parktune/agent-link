@@ -102,7 +102,7 @@ def main():
             assert 'restrict,command=' in added.stdout
             hosts = json.loads(hosts_output.stdout)
             result = asyncio.run(round_trip(root))
-            server_status = json.loads(subprocess.run([str(wrapper), 'status'], capture_output=True, text=True,
+            server_status = json.loads(subprocess.run([str(wrapper), 'status', '--json'], capture_output=True, text=True,
                                                       timeout=20).stdout)
             result['server_sees_hub'] = {k: server_status['hub'].get(k) for k in ('name', 'user', 'from')}
             print(json.dumps({'transport': 'real OpenSSH loopback', 'add_host': 'alias only, hub auto-started',

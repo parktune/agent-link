@@ -39,8 +39,11 @@ account: the key itself grants a shell.
   grants no permissions and must not override the local user; the receiving session keeps its own
   sandbox/approval policy. Labels are not a security boundary.
 - Loop limits: replies to a `reply` are rejected (`reply_to_reply`) and `hops` above the limit
-  (default 3) are rejected by both the sending spoke and the hub. Server sessions may by default
-  only reply to requests they received (`allow_origination = "none"`).
+  (default 3) are rejected by both the sending spoke and the hub. Server sessions may start
+  requests to any host by default (`allow_origination = "all"`); set `"none"` in a server's
+  config.toml to let its sessions only reply to requests they received, or `"host"` for same-host only.
+- The hub tells each server which agents exist on the other hosts (ID, status, delivery mode; no
+  folders or session IDs) so server sessions can address them by name.
 - Codex push passes the message to `codex queue --message=...` as one argument; for that moment it
   is visible to other local accounts through the process list. Do not use push on hosts shared with
   untrusted users.

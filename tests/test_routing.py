@@ -45,8 +45,8 @@ class SameHostTests(Environment):
         self.assertNotIn('secret body', json.dumps(entries))
         self.assertEqual(entries[0]['meta']['size'], len('secret body'))
 
-    async def test_default_policy_only_allows_replies(self):
-        await self.server('gpu1')
+    async def test_origination_none_only_allows_replies(self):
+        await self.server('gpu1', allow_origination='none')
         a = await self.session('gpu1', 'claude', 'alpha')
         await self.session('gpu1', 'claude', 'beta')
         with self.assertRaisesRegex(Exception, 'origination_denied'):
@@ -171,6 +171,28 @@ class HubTests(Environment):
             await client.close()
         self.assertEqual((status['role'], status['host'], status['hosts_connected']), ('hub', 'local', 2))
         self.assertEqual({a['id'] for a in status['agents']}, {'local:claude:main', 'gpu1:claude:head'})
+
+    async def test_servers_see_agents_on_other_hosts_and_reach_them_by_name(self):
+        await self.two_hosts()
+        main = await self.session('local', 'claude', 'agent-link-test')
+        head = await self.session('gpu1', 'claude', 'head')
+        trainer = await self.session('gpu2', 'codex', 'trainer')
+        await self.connected('gpu1')
+        await self.connected('gpu2')
+        gpu2 = self.spokes['gpu2']
+        await until(lambda: {a['id'] for a in gpu2.directory} == {'local:claude:agent-link-test', 'gpu1:claude:head'})
+        self.assertEqual(set(gpu2.directory[0]), {'id', 'host', 'tool', 'name', 'status', 'delivery'})  # no cwd
+        listed = {a['id'] for a in gpu2.list_agents()}
+        self.assertIn('gpu2:codex:trainer', listed)
+        self.assertIn('local:claude:agent-link-test', listed)
+        # A server session asks the PC session by name alone (default policy allows it).
+        sent = await trainer.send('agent-link-test', '자료 요청')
+        self.assertEqual(sent['route'], 'hub')
+        await until(lambda: main.received)
+        self.assertEqual(main.received[0]['from'], 'gpu2:codex:trainer')
+        await head.stop()
+        self.sessions.remove(head)
+        await until(lambda: any(a['id'] == 'gpu1:claude:head' and a['status'] == 'offline' for a in gpu2.directory))
 
     async def test_unknown_session_on_remote_host_is_not_found(self):
         await self.two_hosts()

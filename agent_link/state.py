@@ -47,7 +47,7 @@ def open_db(path):
 @dataclass
 class Config:
     host_name: str = ''
-    allow_origination: str = 'none'
+    allow_origination: str = 'all'
     mirror_local_metadata: bool = True
     max_content_bytes: int = 65536
     max_hops: int = 3

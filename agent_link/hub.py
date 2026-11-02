@@ -11,7 +11,7 @@ import time
 from .protocol import (FRAME_LIMIT, LOCAL_HOST, PROTOCOL_VERSION, ProtocolError, encode, parse_target, read_frame,
                        validate_message)
 from .box import Box
-from .spoke import Spoke, SpokeStore, matches
+from .spoke import Spoke, SpokeStore, directory_entries, matches
 from .state import open_db
 
 CONNECT_TIMEOUT = 5
@@ -161,6 +161,7 @@ class HostLink:
     def __init__(self, hub, record, transport):
         self.hub, self.name, self.transport = hub, record['name'], transport
         self.token = record['token']
+        self.caps, self.directory_sent = set(), None
         self.connected = False
         self.reconnects = 0
         self.last_error = self.last_error_detail = None
@@ -178,6 +179,7 @@ class HostLink:
         return {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': self.token, 'hub': hub_identity(), 'host': self.name}
 
     def check_hello(self, hello):
+        self.caps = set(hello.get('caps') or []) if isinstance(hello.get('caps'), list) else set()
         if hello['op'] != 'hello_ok':
             raise ProtocolError('unauthorized', f'unexpected hello from {self.name}')
         if hello.get('host') != self.name:  # a server older than 0.5.7 does not check this itself
@@ -238,6 +240,8 @@ class HostLink:
             self.writer, self.connected = writer, True
             self.reconnects += 1
             self.last_error = self.last_error_detail = None
+            self.directory_sent = None
+            self.hub.publish_directory()
             self.hub.log('host_connected', host=self.name, connections=self.reconnects)
             queue = asyncio.Queue()
             worker = asyncio.create_task(self.process_outbox(queue))
@@ -396,6 +400,7 @@ class Hub:
         self.local = Spoke(local_config, SpokeStore(self.root / 'local.sqlite3'), log, Box(box_root),
                            uplink=HubUplink(self), accept_links=False)
         self.local.list_agents = self.list_agents
+        self.local.on_presence = self.publish_directory
         self.local.extra_ops = {'hosts': self._hosts_op, 'recent': self._recent_op, 'reload': self._reload_op,
                                 'status': self._status_op}
         self.transport_factory = transport_factory
@@ -428,10 +433,29 @@ class Hub:
                 clean.append({k: agent.get(k) for k in ('id', 'host', 'tool', 'name', 'cwd', 'session_id',
                                                            'started_at', 'last_seen', 'status', 'delivery')})
         self.presence[host] = clean
+        self.publish_directory()
 
     def host_offline(self, host):
         for agent in self.presence.get(host, []):
             agent['status'] = 'offline'
+        self.publish_directory()
+
+    def publish_directory(self):
+        """Tell each connected server about the agents on every other host, when that list changed."""
+        agents = self.all_agents()
+        for name, link in self.links.items():
+            if not link.connected or 'directory' not in link.caps or isinstance(link, PollLink):
+                continue  # servers before 0.6.5 would drop the connection on an unknown frame
+            entries = directory_entries(agents, exclude_host=name)
+            if entries != link.directory_sent:
+                link.directory_sent = entries
+                asyncio.get_running_loop().create_task(self._send_directory(link, entries))
+
+    async def _send_directory(self, link, entries):
+        try:
+            await link.send({'op': 'directory', 'agents': entries})
+        except (ProtocolError, ConnectionError, OSError):
+            link.directory_sent = None  # resent on the next change or reconnect
 
     def all_agents(self):
         agents = [a.public() for a in self.local.agents.values()]

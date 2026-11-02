@@ -56,4 +56,4 @@ push가 실패하거나 스레드를 모르면 박스에 저장한다. 이것이
 | allowlist 프레임 | `ping`/`pong`(keepalive)을 추가했고, `ack`에 선택 필드 `result`를 둔다 | 장애 감지, 그리고 서버 세션에 라우팅 결과(오류 포함)를 돌려주기 위해서다 |
 | `deliver` 응답 | `delivered {id, status}`이며 status는 `delivered`/`stored`/`stored_offline`이다 | 박스 저장을 구분하기 위해서다 |
 | add-host 사전 조건: 원격 실행 경로를 사용자가 알고, daemon이 실행 중 | `agent-link hub add-host <alias>`가 SSH로 `agent-link`를 찾고, 꺼져 있으면 daemon을 systemd user 서비스(실패하면 백그라운드)로 띄운다. 로컬 hub도 같다. 패키지 설치는 여전히 하지 않는다(`setup.sh`를 사용자가 실행) | 사용자 요청(2026-11-02): alias만으로 연결 |
-| 서버 세션의 `list_agents` | 그 호스트의 에이전트만 보인다. 전체 목록은 로컬 PC에서만 보인다 | hub → host 레지스트리 전파 프레임이 명세에 없다 |
+| 서버 세션의 `list_agents` | hub가 hub → host `directory` 프레임으로 다른 호스트의 에이전트(ID·상태·수신 방식)를 알려 주어 서버에서도 전체가 보인다(0.6.5). 기본 `allow_origination`도 `all`로 바꿨다 | 사용자 요청(2026-11-02): 서버 세션에서도 이름으로 요청 |

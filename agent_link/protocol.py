@@ -15,7 +15,7 @@ MESSAGE_FIELDS = frozenset({'id', 'from', 'to', 'type', 'in_reply_to', 'content'
 FRAME_LIMIT = 1 << 20
 
 # hub -> host frames the endpoint lets through (8.3). `ping` is a keepalive addition.
-HUB_TO_HOST = frozenset({'hello', 'enroll', 'deliver', 'ack', 'exchange', 'ping'})
+HUB_TO_HOST = frozenset({'hello', 'enroll', 'deliver', 'ack', 'exchange', 'ping', 'directory'})
 HOST_TO_HUB = frozenset({'hello_ok', 'enroll_ok', 'delivered', 'error', 'outbox', 'presence', 'exchange_ok', 'pong'})
 
 ERROR_CODES = frozenset({

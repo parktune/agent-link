@@ -72,7 +72,7 @@ agent-link revoke                    # 서버: 토큰 해시 삭제, 현재 연�
 | 키 | 기본값 | 설명 |
 |---|---|---|
 | `host_name` | 페어링한 이름, 없으면 짧은 hostname | 에이전트 ID의 호스트 부분. 정하면 페어링한 이름보다 우선한다 |
-| `allow_origination` | `none` | 서버 세션이 먼저 보낼 수 있는 범위: `none`(받은 요청에 대한 회신만), `host`(같은 호스트), `all`. 로컬 PC는 항상 `all` |
+| `allow_origination` | `all` | 서버 세션이 먼저 보낼 수 있는 범위: `all`(모든 호스트), `host`(같은 호스트), `none`(받은 요청에 대한 회신만). 로컬 PC는 항상 `all`. 0.6.5 전에는 기본값이 `none`이었다 |
 | `mirror_local_metadata` | `true` | 같은 호스트 안의 전달을 메타데이터만 hub에 보고 |
 | `max_content_bytes` | 65536 | 본문 상한 |
 | `max_hops` | 3 | hop 상한 |

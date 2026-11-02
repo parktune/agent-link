@@ -431,7 +431,8 @@ async def status(spoke):
     hub = spoke.link.info if spoke.link else None
     return {'op': 'status', 'role': 'spoke', 'host': spoke.host, 'pid': os.getpid(), 'hub_connected': spoke.link is not None,
             'hub': readable(hub) if hub else None, 'enrolled_hubs': [readable(h) for h in spoke.store.enrolled_hubs()],
-            'outbox': spoke.store.outbox_stats(), 'agents': spoke.list_agents()}
+            'outbox': spoke.store.outbox_stats(), 'agents': [a.public() for a in spoke.agents.values()],
+            'others': spoke.directory}
 
 
 def readable(info):
@@ -532,12 +533,16 @@ def format_status(info):
         waiting = (info.get('outbox') or {}).get('items', 0)
         if waiting:
             lines.append(f'outbox   {waiting} message(s) waiting for the hub')
-    agents = info.get('agents') or []
-    online = sum(1 for a in agents if a.get('status') == 'online')
-    lines.append(f'sessions {len(agents)} ({online} online)')
-    width = max((len(a['id']) for a in agents), default=0)
-    for agent in sorted(agents, key=lambda a: (a.get('status') != 'online', a['id'])):
-        lines.append(f'  {agent["id"]:<{width}}  {agent.get("status", "?"):<7}  {agent.get("delivery", "")}')
+    groups = [('sessions', info.get('agents') or [])]
+    if info.get('role') != 'hub':
+        groups.append(('others', info.get('others') or []))  # other hosts, as the hub reported them
+    width = max((len(a['id']) for _, agents in groups for a in agents), default=0)
+    for label, agents in groups:
+        online = sum(1 for a in agents if a.get('status') == 'online')
+        where = ' on other hosts' if label == 'others' else ''
+        lines.append(f'{label:<8} {len(agents)}{where} ({online} online)')
+        for agent in sorted(agents, key=lambda a: (a.get('status') != 'online', a['id'])):
+            lines.append(f'  {agent["id"]:<{width}}  {agent.get("status", "?"):<7}  {agent.get("delivery", "")}')
     return '\n'.join(lines)
 
 

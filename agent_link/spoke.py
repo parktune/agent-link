@@ -250,7 +250,11 @@ class Spoke:
             self.agents[row['id']] = Agent(host=self.host, **{k: row[k] for k in fields})
         self.link = None
         self.extra_ops = {}
-        self.list_agents = lambda filter_text='': [a.public() for a in self.agents.values() if matches(a.public(), filter_text)]
+        # Agents on other hosts, as the hub last reported them (`directory`), so local sessions can find them.
+        self.directory = []
+        self.on_presence = None
+        self.list_agents = lambda filter_text='': [a for a in [x.public() for x in self.agents.values()] + self.directory
+                                                   if matches(a, filter_text)]
         self.server = None
         self._tasks = set()
 
@@ -467,6 +471,8 @@ class Spoke:
     def presence_changed(self):
         if self.link:
             self.spawn(self.link.send(self.presence()))
+        if self.on_presence:
+            self.on_presence()
 
     async def _presence_loop(self):
         while True:
@@ -523,6 +529,24 @@ class OutboxUplink:
             future.set_result(result or {})
 
 
+DIRECTORY_FIELDS = ('id', 'host', 'tool', 'name', 'status', 'delivery')
+
+
+def directory_entries(agents, exclude_host=None):
+    """Agents other hosts may see: ID, status and delivery only (no folders or session IDs)."""
+    entries = []
+    for agent in agents if isinstance(agents, list) else []:
+        if not isinstance(agent, dict) or agent.get('host') == exclude_host:
+            continue
+        try:
+            host, tool, name = parse_target(agent.get('id'))
+        except ProtocolError:
+            continue
+        if host and host == agent.get('host') and tool == agent.get('tool') and name == agent.get('name'):
+            entries.append({k: agent.get(k) for k in DIRECTORY_FIELDS})
+    return entries[:2000]
+
+
 def peer(frame):
     """SSH client address the endpoint attached (from SSH_CONNECTION), if any."""
     value = frame.get('peer')
@@ -574,7 +598,7 @@ class LinkSession:
                 spoke.link.close()  # one hub connection per host; the newest wins
             spoke.link = self
             await self.send({'op': 'hello_ok', 'v': PROTOCOL_VERSION, 'host': spoke.host,
-                             'caps': ['stream', 'exchange', 'mirror']})
+                             'caps': ['stream', 'exchange', 'mirror', 'directory']})
             spoke.log('hub_connected', host=spoke.host, hub=self.info, outbox=spoke.store.outbox_stats())
             for frame in spoke.store.outbox_after(0):
                 await self.send(frame)
@@ -608,6 +632,8 @@ class LinkSession:
                 spoke.uplink.acked(seq, frame.get('result'))
         elif op == 'deliver':
             spoke.spawn(self._deliver(frame.get('msg')))
+        elif op == 'directory':
+            spoke.directory = directory_entries(frame.get('agents'), exclude_host=spoke.host)
         elif op == 'exchange':
             after = int(frame.get('after', 0))
             spoke.store.outbox_ack(after)

@@ -1,6 +1,6 @@
 {
   "name": "agent-link",
-  "version": "0.6.4",
+  "version": "0.6.5",
   "description": "Register a Claude Code or Codex session in agent-link (agent-link:register) and change its settings (agent-link:settings): withdraw, rename, mailbox watch. Sending is the /agent-link skill installed by setup.sh.",
   "author": {
     "name": "parktune",

@@ -73,7 +73,7 @@ $agent-link trainer 체크포인트 경로 알려줘
   - 로컬 PC: `<repo>/hub/<tool>-<name>/received/*.md`
   - 서버: `<repo>/spoke/<tool>-<name>/received/*.md`
   - 메시지 1건이 Markdown 파일 1개입니다. `/agent-link`로 확인하면 `received/read/`로 옮깁니다.
-- 서버 세션은 기본적으로 **받은 요청에 대한 회신만** 보낼 수 있습니다(`allow_origination`). 회신에 다시 회신하는 것은 거부합니다(에이전트 간 무한 핑퐁 방지).
+- 서버 세션도 다른 호스트의 세션을 이름으로 부를 수 있습니다(예: "agent-link-test-head에게 자료를 요청해"). hub가 전체 세션 목록을 각 서버에 알려 줍니다. 서버 세션이 받은 요청에만 회신하게 하려면 그 서버의 `config.toml`에 `allow_origination = "none"`을 둡니다. 회신에 다시 회신하는 것은 거부합니다(에이전트 간 무한 핑퐁 방지).
 
 ## 구조
 여러 서버와 로컬 PC에서 도는 Claude Code·Codex 세션이 서로 메시지를 주고받게 합니다.
