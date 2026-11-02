@@ -13,8 +13,8 @@ import sys
 
 from .box import set_watch_enabled, stop_waiter, waiter_alive, watch_enabled
 from .client import SpokeClient
-from .inject import (CLAUDE_INSTRUCTIONS, CodexQueue, channel_notification, claude_channel_enabled, claude_launch_args,
-                     claude_restart_argv, codex_envelope)
+from .inject import (CLAUDE_INSTRUCTIONS, CodexQueue, channel_notification, claude_channel_enabled, claude_channel_policy,
+                     claude_launch_args, claude_restart_argv, codex_envelope)
 from .protocol import NAME, ProtocolError
 from .sessions import claude_session_name, codex_session_name
 from .state import default_socket
@@ -33,7 +33,10 @@ class Adapter:
         self.client = SpokeClient(socket_path, self.inject)
         self.session_id = os.environ.get('CLAUDE_CODE_SESSION_ID' if tool == 'claude' else 'CODEX_THREAD_ID', '')
         self.thread = self.session_id if tool == 'codex' else ''
-        self.channel = claude_channel_enabled() if channel is None and tool == 'claude' else bool(channel)
+        # Opting in at launch is not enough when the organization keeps Channels off: events would be dropped.
+        self.channel_blocked = claude_channel_policy() if channel is None and tool == 'claude' else None
+        self.channel = (claude_channel_enabled() and not self.channel_blocked) if channel is None and tool == 'claude' \
+            else bool(channel)
         self.codex = codex or CodexQueue()
         self.registration = None
         self.identity = None
@@ -46,6 +49,8 @@ class Adapter:
         if self.tool == 'claude':
             if self.channel:
                 return {'available': True, 'via': 'claude channel'}
+            if self.channel_blocked:
+                return {'available': False, 'reason': self.channel_blocked}
             return {'available': False, 'reason': 'Claude was not started with '
                     '--dangerously-load-development-channels server:agent-link; messages go to the mailbox'}
         if self.thread:
@@ -123,8 +128,8 @@ class Adapter:
 
         `by_id` resumes by session ID, for when the name is missing or matches more than one session.
         """
-        if self.tool != 'claude' or self.channel or not self.session_id:
-            return None
+        if self.tool != 'claude' or self.channel or self.channel_blocked or not self.session_id:
+            return None  # reopening with the flag cannot help while the organization keeps Channels off
         launch, cwd = claude_launch_args(), shlex.quote(os.getcwd())
         by_id = f'cd {cwd} && {shlex.join(claude_restart_argv(self.session_id, launch))}'
         name = name or self.session_name()

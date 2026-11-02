@@ -1,5 +1,6 @@
 """Push into an open session: Claude Channels notification or `codex queue` (11, 12)."""
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -42,6 +43,39 @@ def claude_channel_enabled(server_name='agent-link', cmdlines=None):
                 if any(f'server:{server_name}' in value.split(',') for value in values):
                     return True
     return False
+
+
+# Team and Enterprise organizations must turn Channels on; personal plans may use them as they are.
+OPT_IN_ORGANIZATIONS = ('claude_team', 'claude_enterprise')
+MANAGED_SETTINGS = ('/etc/claude-code/managed-settings.json',)
+
+
+def _json(path):
+    try:
+        with open(path) as handle:
+            value = json.load(handle)
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def claude_channel_policy(config_dir=None, managed=MANAGED_SETTINGS):
+    """None when this Claude login may receive channel events, else why not.
+
+    With a Team or Enterprise login, Claude Code drops channel events silently (even with the
+    development flag) unless the organization set channelsEnabled: true in managed settings. Claude
+    Code keeps the server-managed copy in remote-settings.json and the login in .claude.json.
+    """
+    configured = config_dir or os.environ.get('CLAUDE_CONFIG_DIR')
+    home = Path(configured) if configured else Path.home() / '.claude'
+    account = _json(home / '.claude.json' if configured else Path.home() / '.claude.json')
+    organization = (account.get('oauthAccount') or {}).get('organizationType')
+    if organization not in OPT_IN_ORGANIZATIONS:
+        return None
+    if any(_json(path).get('channelsEnabled') is True for path in (home / 'remote-settings.json', *managed)):
+        return None
+    return (f'this {organization.removeprefix("claude_")} organization has not enabled Channels; an administrator '
+            'must set channelsEnabled: true in managed settings. Until then messages go to the mailbox')
 
 
 def claude_launch_args(cmdlines=None):

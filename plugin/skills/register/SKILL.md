@@ -33,6 +33,7 @@ If the result has `watch` with `enabled` true and `running_pid` null, run `watch
 Tell the user the ID and mailbox folder in one or two lines. Then:
 
 - **Claude, `push.available` true:** messages arrive live in this session. Nothing else to do.
+- **Claude, `push.available` false because the organization has not enabled Channels** (`push.reason` says so and there is no `restart`): messages go to the mailbox and the watch from step 4 wakes this session. Reopening with the flag would not help: Claude Code drops channel events until an administrator sets `channelsEnabled: true` in the organization's managed settings. Say that in one or two lines; show no restart command.
 - **Claude, `push.available` false:** messages go to the mailbox; the watch from step 4 wakes this session meanwhile, a few seconds late. To receive them live, show `restart.command` from the result exactly, in a code block, with these steps:
   1. Leave this session (`/exit` or Ctrl+C twice). A copy would start if it were still open.
   2. Run the command in a terminal. It goes to this session's folder, adds `--dangerously-load-development-channels server:agent-link`, keeps the other flags this session was started with, and resumes the session by its name (`restart.resume`).

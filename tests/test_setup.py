@@ -64,11 +64,11 @@ class UpTests(unittest.TestCase):
                                                    check=True).stdout)
                 self.assertIsNone(second['started'])
                 self.assertEqual(second['host'], 'gpu-server-1')
-                status = json.loads(subprocess.run([sys.executable, '-m', 'agent_link', 'status'], env=env,
+                status = json.loads(subprocess.run([sys.executable, '-m', 'agent_link', 'status', '--json'], env=env,
                                                    capture_output=True, text=True, timeout=30, check=True).stdout)
                 self.assertEqual((status['role'], status['host'], status['hub_connected']), ('spoke', 'gpu-server-1', False))
             finally:
-                status = subprocess.run([sys.executable, '-m', 'agent_link', 'status'], env=env,
+                status = subprocess.run([sys.executable, '-m', 'agent_link', 'status', '--json'], env=env,
                                         capture_output=True, text=True, timeout=30)
                 os.kill(json.loads(status.stdout)['pid'], signal.SIGTERM)
                 time.sleep(0.2)
@@ -97,3 +97,41 @@ class RenameMigrationTests(unittest.TestCase):
                              {'gpu-server-1': '/srv/x/agent-link/.venv/bin/agent-link',
                               'gpu-server-2': '/opt/custom/agent-link'})
             store.db.close()
+
+
+class StatusFormatTests(unittest.TestCase):
+    def test_summary_hides_counters_and_shows_why_a_server_is_down(self):
+        from agent_link.cli import format_status
+        text = format_status({'role': 'hub', 'pid': 7, 'hosts': [
+            {'name': 'gpu-server-1', 'connected': True, 'reconnects': 2, 'last_error': None, 'last_error_detail': None},
+            {'name': 'gpu-server-2', 'connected': False, 'last_error': 'host_mismatch', 'last_error_detail': None}],
+            'agents': [{'id': 'local:claude:main', 'status': 'online', 'delivery': 'push'}]})
+        self.assertIn('servers  1/2 connected', text)
+        self.assertIn('gpu-server-2  disconnected (host_mismatch)', text)
+        self.assertNotIn('reconnects', text)
+        self.assertNotIn('last_error', text)
+        self.assertIn('sessions 1 (1 online)', text)
+
+
+class ChannelPolicyTests(unittest.TestCase):
+    def write(self, path, value):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(value))
+
+    def test_team_and_enterprise_logins_need_channels_enabled(self):
+        from agent_link.inject import claude_channel_policy
+        with tempfile.TemporaryDirectory() as root:
+            home = Path(root)
+            account = home / '.claude.json'
+            self.write(account, {'oauthAccount': {'organizationType': 'claude_max'}})
+            self.assertIsNone(claude_channel_policy(home, managed=()))
+            self.write(account, {'oauthAccount': {'organizationType': 'claude_team'}})
+            self.assertIn('team organization has not enabled Channels', claude_channel_policy(home, managed=()))
+            self.write(home / 'remote-settings.json', {'channelsEnabled': True})
+            self.assertIsNone(claude_channel_policy(home, managed=()))
+            (home / 'remote-settings.json').unlink()
+            self.write(account, {'oauthAccount': {'organizationType': 'claude_enterprise'}})
+            managed = home / 'managed-settings.json'
+            self.write(managed, {'channelsEnabled': True})
+            self.assertIsNone(claude_channel_policy(home, managed=(managed,)))
+            self.assertIsNotNone(claude_channel_policy(home, managed=()))

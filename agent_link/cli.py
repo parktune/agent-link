@@ -392,8 +392,9 @@ def build_parser():
     parser = argparse.ArgumentParser(prog='agent-link', description='agent-link: the hub on the local PC (agent-link hub ...) '
                                      'and the daemon on each server')
     commands = parser.add_subparsers(dest='command', required=True)
-    commands.add_parser('status', help='Connection status: the hub and its servers on the PC, the daemon on a server') \
-        .add_argument('--socket', type=Path)
+    status = commands.add_parser('status', help='Connection status: the hub and its servers on the PC, the daemon on a server')
+    status.add_argument('--socket', type=Path)
+    status.add_argument('--json', action='store_true', help='Everything the hub or daemon reports, as JSON')
 
     # Server side: the spoke daemon.
     up = commands.add_parser('up', help='Server: start the daemon in the background if it is not running')
@@ -441,22 +442,64 @@ def build_parser():
     return parser
 
 
-def show_status(socket_path):
+def format_status(info):
+    """A few lines for people: what runs here, what it is connected to, and the sessions."""
+    lines = []
+    if info.get('role') == 'hub':
+        hosts = info.get('hosts') or []
+        lines.append(f'hub      running (pid {info["pid"]})')
+        lines.append(f'servers  {sum(1 for h in hosts if h.get("connected"))}/{len(hosts)} connected')
+        width = max((len(h['name']) for h in hosts), default=0)
+        for host in hosts:
+            if host.get('connected'):
+                lines.append(f'  {host["name"]:<{width}}  connected')
+            else:
+                why = host.get('last_error_detail') or host.get('last_error') or 'connecting'
+                lines.append(f'  {host["name"]:<{width}}  disconnected ({why})')
+    else:
+        lines.append(f'daemon   {info["host"]} (pid {info["pid"]})')
+        hub = info.get('hub')
+        if info.get('hub_connected') and hub:
+            who = ' '.join(filter(None, [hub.get('name'), f'({hub["user"]})' if hub.get('user') else None]))
+            where = f' from {hub["from"]}' if hub.get('from') else ''
+            since = f' since {hub["connected_since"]}' if hub.get('connected_since') else ''
+            lines.append(f'hub      connected{": " + who if who else ""}{where}{since}')
+        else:
+            lines.append('hub      not connected' + (' (replies wait in the outbox)' if (info.get('outbox') or {}).get('items') else ''))
+        waiting = (info.get('outbox') or {}).get('items', 0)
+        if waiting:
+            lines.append(f'outbox   {waiting} message(s) waiting for the hub')
+    agents = info.get('agents') or []
+    online = sum(1 for a in agents if a.get('status') == 'online')
+    lines.append(f'sessions {len(agents)} ({online} online)')
+    width = max((len(a['id']) for a in agents), default=0)
+    for agent in sorted(agents, key=lambda a: (a.get('status') != 'online', a['id'])):
+        lines.append(f'  {agent["id"]:<{width}}  {agent.get("status", "?"):<7}  {agent.get("delivery", "")}')
+    return '\n'.join(lines)
+
+
+def show_status(socket_path, as_json=False):
     if not service.alive(socket_path):
         raise SystemExit('agent-link is not running on this machine. '
                          'Local PC: `agent-link hub up` (or `agent-link hub add-host <alias>`); server: `agent-link up`.')
     try:
-        emit(asyncio.run(ask(socket_path, 'status')))
+        info = asyncio.run(ask(socket_path, 'status'))
     except ProtocolError as error:
         raise SystemExit(f'The running hub/daemon does not answer status ({error.code}); it is an older version. '
                          'Restart it: `agent-link hub up --restart` (PC) or `agent-link up --restart` (server).') from None
+    info.pop('rid', None)
+    info.pop('op', None)
+    if as_json:
+        emit(info)
+    else:
+        print(format_status(info), flush=True)
     return 0
 
 
 def agent_link(argv=None):
     args = build_parser().parse_args(argv)
     if args.command == 'status':
-        return show_status(args.socket or default_socket())
+        return show_status(args.socket or default_socket(), args.json)
     if args.command == 'hub':
         args.command = args.hub_command
         return run_hub(args)

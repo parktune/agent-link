@@ -38,10 +38,11 @@ agent-link hub add-host gpu-server-1   # 또는 alias를 직접 지정
 ## 확인 명령
 
 ```bash
-agent-link status      # 로컬 PC와 서버 어디서든 연결 상태 확인
+agent-link status          # 로컬 PC와 서버 어디서든 연결 상태 요약
+agent-link status --json   # 재연결 횟수·마지막 오류까지 전부
 ```
 
-- 로컬 PC에서는 hub 상태를 보여 줍니다. 서버별 연결 여부(`hosts_connected`, `hosts`)와 전체 세션 목록이 나옵니다.
+- 로컬 PC에서는 hub 상태를 보여 줍니다. 연결된 서버 수와 서버별 연결 여부(끊겼으면 그 이유), 전체 세션 목록이 나옵니다.
 - 서버에서는 daemon 상태를 보여 줍니다. hub 연결 여부, 연결된 hub의 이름·접속 주소, 그 서버의 세션 목록이 나옵니다.
 - 더 자세히 보려면 로컬 PC에서 `agent-link hub hosts`, `agent-link hub agents`, `agent-link hub log`를 씁니다.
 
