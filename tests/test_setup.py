@@ -23,8 +23,8 @@ class DiscoveryTests(unittest.TestCase):
             target.parent.mkdir(parents=True)
             target.write_text('#!/bin/sh\necho "$0" "$@"\n')
             target.chmod(0o755)
-            result = self.run_remote(home, remote_up_command(None, 'gpu-230'))
-            self.assertEqual(result.stdout.split(), [str(target), 'up', '--json', '--invite', '--host-name', 'gpu-230'])
+            result = self.run_remote(home, remote_up_command(None, 'gpu-server-1'))
+            self.assertEqual(result.stdout.split(), [str(target), 'up', '--json', '--invite', '--host-name', 'gpu-server-1'])
 
     def test_reports_when_agent_link_is_missing(self):
         with tempfile.TemporaryDirectory() as home:
@@ -41,15 +41,15 @@ class UpTests(unittest.TestCase):
     def test_up_starts_a_background_daemon_once_and_issues_an_invitation(self):
         with tempfile.TemporaryDirectory(prefix='al-') as state:
             env = {**os.environ, 'AGENT_HUB_STATE': state, 'AGENT_HUB_BOX': state + '/box'}
-            command = [sys.executable, '-m', 'agent_link', 'agent-hub', 'up', '--json', '--invite', '--host-name', 'gpu-230']
+            command = [sys.executable, '-m', 'agent_link', 'agent-hub', 'up', '--json', '--invite', '--host-name', 'gpu-server-1']
             first = json.loads(subprocess.run(command, env=env, capture_output=True, text=True, timeout=30, check=True).stdout)
             try:
-                self.assertEqual((first['host'], first['started']), ('gpu-230', 'background'))
+                self.assertEqual((first['host'], first['started']), ('gpu-server-1', 'background'))
                 self.assertRegex(first['code'], r'^[A-Z2-7]{4}(-[A-Z2-7]{4}){3}$')
                 second = json.loads(subprocess.run(command, env=env, capture_output=True, text=True, timeout=30,
                                                    check=True).stdout)
                 self.assertIsNone(second['started'])
-                self.assertEqual(second['host'], 'gpu-230')
+                self.assertEqual(second['host'], 'gpu-server-1')
             finally:
                 status = subprocess.run([sys.executable, '-m', 'agent_link', 'agent-hub', 'status'], env=env,
                                         capture_output=True, text=True, timeout=30)

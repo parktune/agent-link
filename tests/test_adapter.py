@@ -47,11 +47,11 @@ class InjectTests(unittest.IsolatedAsyncioTestCase):
 
     def test_restart_command_keeps_the_users_flags_and_adds_the_channel(self):
         flag = '--dangerously-load-development-channels'
-        self.assertEqual(claude_launch_args([['python', 'mcp'], ['claude', '--resume', 'vdp-main']]), ['--resume', 'vdp-main'])
+        self.assertEqual(claude_launch_args([['python', 'mcp'], ['claude', '--resume', 'project-head']]), ['--resume', 'project-head'])
         self.assertEqual(claude_launch_args([['node', '/usr/lib/claude/cli.js', '-c']]), ['-c'])
         self.assertEqual(claude_launch_args([['bash']]), [])
-        self.assertEqual(claude_restart_argv('vdp-main', ['--resume', 'vdp-main']),
-                         ['claude', flag, 'server:agent-link', '--resume', 'vdp-main'])
+        self.assertEqual(claude_restart_argv('project-head', ['--resume', 'project-head']),
+                         ['claude', flag, 'server:agent-link', '--resume', 'project-head'])
         self.assertEqual(claude_restart_argv('x', ['--dangerously-skip-permissions', '-c', '--model', 'opus', '-n', 'old',
                                                    '--channels', 'plugin:a@b', '-r']),
                          ['claude', flag, 'server:agent-link', '--dangerously-skip-permissions', '--model', 'opus',
@@ -301,8 +301,8 @@ class SessionNameTests(Environment):
         self.write(self.root / 'claude/projects/-home-x' / f'{sid}.jsonl', [
             {'type': 'user', 'message': 'custom-title in text only'},
             {'type': 'custom-title', 'customTitle': 'first', 'sessionId': sid},
-            {'type': 'custom-title', 'customTitle': 'vdp-main', 'sessionId': sid}])
-        self.assertEqual(claude_session_name(sid, self.root / 'claude'), 'vdp-main')
+            {'type': 'custom-title', 'customTitle': 'project-head', 'sessionId': sid}])
+        self.assertEqual(claude_session_name(sid, self.root / 'claude'), 'project-head')
         self.assertIsNone(claude_session_name('../../etc', self.root / 'claude'))
         self.assertIsNone(claude_session_name('0' * 36, self.root / 'claude'))
         self.write(self.root / 'codex/session_index.jsonl', [
@@ -327,14 +327,14 @@ class SessionNameTests(Environment):
             with self.assertRaisesRegex(ProtocolError, 'cannot be an agent name'):
                 await adapter.call('register', {})
             self.write(self.root / 'claude/projects/p' / f'{sid}.jsonl',
-                       [{'type': 'custom-title', 'customTitle': 'vdp-main'}])
-            self.assertEqual(adapter.whoami()['session_name'], 'vdp-main')
-            self.assertEqual((await adapter.call('register', {}))['id'], 'gpu1:claude:vdp-main')
+                       [{'type': 'custom-title', 'customTitle': 'project-head'}])
+            self.assertEqual(adapter.whoami()['session_name'], 'project-head')
+            self.assertEqual((await adapter.call('register', {}))['id'], 'gpu1:claude:project-head')
             self.assertEqual((await adapter.call('register', {'name': 'custom'}))['id'], 'gpu1:claude:custom')
             restart = adapter.whoami()['restart']
-            self.assertEqual(restart['resume'], 'vdp-main')  # the session name, not the agent name
+            self.assertEqual(restart['resume'], 'project-head')  # the session name, not the agent name
             self.assertRegex(restart['command'], r'^cd \S+ && claude --dangerously-load-development-channels '
-                                                 r'server:agent-link .*--resume vdp-main$')
+                                                 r'server:agent-link .*--resume project-head$')
             self.assertTrue(restart['by_id'].endswith(f'--resume {sid}'))
             adapter.channel = True
             self.assertNotIn('restart', adapter.whoami())  # already live

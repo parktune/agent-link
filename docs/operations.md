@@ -28,7 +28,7 @@ git clone https://github.com/parktune/agent-link.git ~/work/agent-link && ~/work
 - 서버에 1단계가 끝나 있다.
 
 ```bash
-hubctl add-host gpu-230
+hubctl add-host gpu-server-1
 ```
 
 | 단계 | 내용 |

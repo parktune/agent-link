@@ -28,7 +28,7 @@ $agent-link trainer 체크포인트 경로 알려줘
 - 등록하지 않은 세션에서 `/agent-link`를 쓰면 세션 이름(`/rename`)으로 자동 등록하고 진행합니다. 세션 이름이 없을 때만 `/agent-link:register`를 먼저 쓰라고 안내합니다. 이 세션에서 등록을 철회했으면 다시 등록하지 않습니다. 세션 ID는 `호스트:도구:이름`입니다(예: `gpu-server-1:claude:project-head`, 로컬 PC는 `local:claude:main`).
 - 보낸 세션은 기다리지 않고 하던 일을 계속합니다. 회신은 나중에 도착합니다.
 - **받는 쪽:** 세션이 열려 있으면 그 세션에 바로 들어갑니다.
-  - Claude: `claude --dangerously-load-development-channels server:agent-link`로 시작한 세션이어야 합니다. 플래그 없이 연 세션에서 `/agent-link:register`를 쓰면, 그 세션을 나간 뒤 실행할 명령을 알려 줍니다. 세션 폴더로 이동해 원래 플래그를 그대로 두고 채널 플래그를 더해 `--resume <세션 이름>`으로 다시 엽니다(예: `cd /home/me && claude --dangerously-load-development-channels server:agent-link --resume vdp-main`).
+  - Claude: `claude --dangerously-load-development-channels server:agent-link`로 시작한 세션이어야 합니다. 플래그 없이 연 세션에서 `/agent-link:register`를 쓰면, 그 세션을 나간 뒤 실행할 명령을 알려 줍니다. 세션 폴더로 이동해 원래 플래그를 그대로 두고 채널 플래그를 더해 `--resume <세션 이름>`으로 다시 엽니다(예: `cd /home/me && claude --dangerously-load-development-channels server:agent-link --resume project-head`).
   - Codex: 스레드 ID 또는 `/rename` 이름으로 등록한 세션이어야 합니다(`codex queue`).
 - 바로 넣을 수 없으면 박스에 저장합니다. 세션이 닫혀 있거나, push가 안 되는 세션이거나, push가 실패한 경우입니다.
   - 플래그 없이 연 Claude 세션은 등록할 때(또는 첫 `/agent-link`) 박스 감시를 백그라운드로 겁니다(`agent-hub wait-box`). 메시지가 박스에 들어오면 몇 초 안에 세션이 깨어나 읽습니다. 세션이 열려 있는 동안만 동작합니다. `/agent-link:settings watch off`로 끄면 그 이름에는 다시 걸지 않고, `watch on`으로 다시 켭니다.
@@ -56,10 +56,10 @@ git clone https://github.com/parktune/agent-link.git ~/work/agent-link && ~/work
 
 ```bash
 hubctl discover           # ~/.ssh/config 호스트 목록에서 Space로 고르고 Enter로 확정
-hubctl add-host gpu-230   # 또는 alias를 직접 지정
+hubctl add-host gpu-server-1   # 또는 alias를 직접 지정
 ```
 
-`discover`는 이미 등록된 서버를 `[=] (등록됨)`으로 표시합니다. 확정하면 고른 서버마다 아래 `add-host` 과정을 차례로 실행하고 결과를 요약합니다. 터미널이 아닌 곳에서는 `--hosts gpu-230,gpu-vlm`으로 지정합니다.
+`discover`는 이미 등록된 서버를 `[=] (등록됨)`으로 표시합니다. 확정하면 고른 서버마다 아래 `add-host` 과정을 차례로 실행하고 결과를 요약합니다. 터미널이 아닌 곳에서는 `--hosts gpu-server-1,gpu-server-2`으로 지정합니다.
 
 이 한 줄이 SSH로 서버에 들어가 다음을 모두 처리합니다.
 - `agent-hub`를 찾습니다(`~/work/agent-link`, `~/agent-link`, PATH 순).
@@ -69,7 +69,7 @@ hubctl add-host gpu-230   # 또는 alias를 직접 지정
 
 호스트 이름은 alias가 됩니다(`--name`으로 변경). 서버마다 이 명령만 반복하면 됩니다.
 
-준비되어 있어야 하는 것은 하나입니다. `ssh gpu-230`이 비밀번호 없이 되고 서버 host key가 known_hosts에 있어야 합니다. agent-link는 host key를 자동으로 받아들이지 않습니다.
+준비되어 있어야 하는 것은 하나입니다. `ssh gpu-server-1`이 비밀번호 없이 되고 서버 host key가 known_hosts에 있어야 합니다. agent-link는 host key를 자동으로 받아들이지 않습니다.
 마지막에 출력되는 `authorized_keys` 한 줄은 전용 계정을 쓸 때의 선택적 보안 강화입니다. 전용 계정, 폐기, 설정은 [운영 가이드](docs/operations.md)에 있습니다.
 
 ## 확인 명령

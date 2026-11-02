@@ -284,19 +284,19 @@ class HubIdentityTests(Environment):
         code, _ = spoke.store.invite()
         token = 'T' * 43
         process, reply = await self.endpoint_session(
-            [{'op': 'enroll', 'code': code, 'token': token, 'hub': {'name': 'my-pc', 'user': 'taeyoon', 'x': 'drop'},
+            [{'op': 'enroll', 'code': code, 'token': token, 'hub': {'name': 'my-pc', 'user': 'alice', 'x': 'drop'},
               'peer': 'forged'}], '10.0.0.7 51234 10.0.0.1 22')
         self.assertEqual(reply['op'], 'enroll_ok')
         await process.wait()
         self.assertEqual(spoke.store.enrolled_hubs()[0]['name'], 'my-pc')
         self.assertNotIn('x', spoke.store.enrolled_hubs()[0])
         process, reply = await self.endpoint_session(
-            [{'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token, 'hub': {'name': 'my-pc', 'user': 'taeyoon'},
+            [{'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token, 'hub': {'name': 'my-pc', 'user': 'alice'},
               'peer': '6.6.6.6:1'}], '10.0.0.7 51300 10.0.0.1 22')
         self.assertEqual(reply['op'], 'hello_ok')
         await until(lambda: spoke.link is not None)
         info = spoke.link.info
-        self.assertEqual((info['name'], info['user'], info['from']), ('my-pc', 'taeyoon', '10.0.0.7:51300'))
+        self.assertEqual((info['name'], info['user'], info['from']), ('my-pc', 'alice', '10.0.0.7:51300'))
         self.assertIn('connected_since', info)
         process.stdin.close()
         await process.wait()

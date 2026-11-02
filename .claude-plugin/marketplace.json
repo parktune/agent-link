@@ -1,6 +1,6 @@
 {
   "name": "agent-link",
-  "owner": {"name": "Taeyoon Park", "url": "https://github.com/parktune"},
+  "owner": {"name": "parktune", "url": "https://github.com/parktune"},
   "description": "Marketplace for the agent-link plugin",
   "plugins": [
     {
