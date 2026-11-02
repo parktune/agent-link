@@ -348,9 +348,9 @@ class PairedNameTests(Environment):
         from agent_link import cli
         with tempfile.TemporaryDirectory() as state, mock.patch.dict(os.environ, {'AGENT_HUB_STATE': state}):
             # `agent-link up` without a name (or with the hostname) still comes back as the paired name.
-            self.assertEqual(cli.daemon_host_name(spoke.store, 'gpu58'), 'gpu1')
+            self.assertEqual(cli.daemon_host_name(spoke.store, 'old-hostname'), 'gpu1')
             Path(state, 'config.toml').write_text('host_name = "chosen"\n')
-            self.assertEqual(cli.daemon_host_name(spoke.store, 'gpu58'), 'chosen')  # an explicit setting wins
+            self.assertEqual(cli.daemon_host_name(spoke.store, 'old-hostname'), 'chosen')  # an explicit setting wins
         fresh = await self.server('gpu2')
         with tempfile.TemporaryDirectory() as state, mock.patch.dict(os.environ, {'AGENT_HUB_STATE': state}):
             self.assertEqual(cli.daemon_host_name(fresh.store, 'gpu-server-2'), 'gpu-server-2')  # first pairing: the hub's name
@@ -384,7 +384,7 @@ class PairedNameTests(Environment):
         link = HostLink.__new__(HostLink)
         link.name = 'gpu-server-2'
         link.check_hello({'op': 'hello_ok', 'host': 'gpu-server-2'})
-        with self.assertRaisesRegex(ProtocolError, 'host_mismatch.*"gpu58".*"gpu-server-2"'):
-            link.check_hello({'op': 'hello_ok', 'host': 'gpu58'})
+        with self.assertRaisesRegex(ProtocolError, 'host_mismatch.*"old-hostname".*"gpu-server-2"'):
+            link.check_hello({'op': 'hello_ok', 'host': 'old-hostname'})
         with self.assertRaisesRegex(ProtocolError, 'unauthorized'):
             link.check_hello({'op': 'error'})
