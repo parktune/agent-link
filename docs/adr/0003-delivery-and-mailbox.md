@@ -11,8 +11,8 @@
    - 세션이 닫혀 있다. 등록된 적 있는 에이전트이면 저장한다(`stored_offline`).
    - push 수단이 없다(`delivery=box`).
    - push가 실패했다(`stored`).
-3. 박스 위치: 로컬 PC는 `<repo>/hub/`, 서버는 `<repo>/spoke/`. 그 아래 `<tool>-<name>/received/<YYYYMMDD-HHMMSS>_<보낸ID>_<id끝8자>.md`. 계정 라벨은 파일 머리말에 둔다. 읽은 파일은 `received/read/`로 옮긴다. 두 폴더 모두 git에 올리지 않는다.
-4. 세션의 이름과 계정은 그 세션에서 처음 `/agent-link`(`$agent-link`)를 쓸 때 사용자에게 물어 등록한다. 등록은 spoke daemon(hub)에 영속 저장되고, 세션이 닫혀도 오프라인 에이전트로 남아 박스로 계속 받는다.
+3. 박스 위치: 로컬 PC는 `<repo>/hub/`, 서버는 `<repo>/spoke/`. 그 아래 `<tool>-<name>/received/<YYYYMMDD-HHMMSS>_<보낸ID>_<id끝8자>.md`. 읽은 파일은 `received/read/`로 옮긴다. 두 폴더 모두 git에 올리지 않는다.
+4. 세션의 이름은 그 세션에서 처음 `/agent-link`(`$agent-link`)를 쓸 때 사용자에게 물어 등록한다. 등록은 spoke daemon(hub)에 영속 저장되고, 세션이 닫혀도 오프라인 에이전트로 남아 박스로 계속 받는다.
 
 ## 명세와의 차이
 

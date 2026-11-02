@@ -67,7 +67,7 @@ class MailboxTests(Environment):
         files = sorted(p.relative_to(self.root / 'gpu1' / 'box').parts[0] for p in (self.root / 'gpu1' / 'box').rglob('*.md'))
         self.assertEqual(files, ['claude-closed', 'claude-failing', 'codex-boxed'])
         text = next((self.root / 'gpu1/box/codex-boxed/received').glob('*.md')).read_text()
-        self.assertIn('account: acct', text)
+        self.assertNotIn('account', text)
         self.assertIn('from: gpu1:claude:alpha', text)
         messages = await boxed.box()
         self.assertEqual([m['content'] for m in messages], ['b'])

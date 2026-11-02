@@ -29,12 +29,12 @@ class Box:
         _, tool, name = parse_target(agent)
         return self.root / f'{tool}-{name}' / 'received'
 
-    def put(self, message, account=''):
+    def put(self, message):
         folder = _private(self.folder(message['to']))
         stamp = re.sub(r'[^0-9]', '', message['created_at'])[:14]
         sender = message['from'].replace(':', '-')
         path = folder / f'{stamp[:8]}-{stamp[8:]}_{sender}_{message["id"][-8:]}.md'
-        header = {'id': message['id'], 'from': message['from'], 'to': message['to'], 'account': account,
+        header = {'id': message['id'], 'from': message['from'], 'to': message['to'],
                   'type': message['type'], 'in_reply_to': message['in_reply_to'] or '', 'hops': message['hops'],
                   'created_at': message['created_at']}
         text = '---\n' + ''.join(f'{k}: {v}\n' for k, v in header.items()) + '---\n\n' + message['content'] + '\n'

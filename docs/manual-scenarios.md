@@ -20,7 +20,7 @@
 |---|---|---|---|
 | S1 | 로컬 Claude → 서버 Claude → 회신 | `test_s1_round_trip...`, loopback 스크립트 | 로컬 `main`에서 "gpu-server-1의 project-head 세션에게 현황 보고를 요청해". 서버 세션이 처리하고 회신이 로컬에 push된다. 로컬 세션은 기다리지 않고 작업을 이어간다 |
 | S2 | 같은 서버 Claude 2개 | `test_s2_s10...` | 지정한 세션에만 도착한다 |
-| S3 | 같은 서버, 다른 계정 | (계정은 라벨) | 서로 다른 구독 계정으로 로그인한 두 Claude를 같은 OS 사용자로 연다. 하나의 daemon으로 동작한다. 다른 OS 사용자면 `socket_group` 구성이 필요하다(15장 3번) |
+| S3 | 같은 서버, 다른 계정 | 없음 | 서로 다른 구독 계정으로 로그인한 두 Claude를 같은 OS 사용자로 연다. 하나의 daemon으로 동작한다. 다른 OS 사용자면 `socket_group` 구성이 필요하다(15장 3번) |
 | S4 | Codex 대상 S1 | 어댑터 테스트 | M0-4 확인 후 수행 |
 | S5 | 세션 종료 후 전송 | `test_s5_s17...` | 오류 대신 `stored_offline`이고 박스에 저장된다(ADR 0003). `hubctl agents`에 offline으로 표시된다 |
 | S6 | 한 호스트 단절 | `test_s6...` | 서버 하나의 네트워크를 끊는다. `hubctl hosts`에서 그 호스트만 백오프하고 복구 후 재연결된다 |

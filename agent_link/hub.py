@@ -398,7 +398,7 @@ class Hub:
         clean = []
         for agent in agents:
             if isinstance(agent, dict) and agent.get('host') == host:
-                clean.append({k: agent.get(k) for k in ('id', 'host', 'tool', 'name', 'account', 'cwd', 'session_id',
+                clean.append({k: agent.get(k) for k in ('id', 'host', 'tool', 'name', 'cwd', 'session_id',
                                                            'started_at', 'last_seen', 'status', 'delivery')})
         self.presence[host] = clean
 

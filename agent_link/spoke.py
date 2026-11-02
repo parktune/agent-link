@@ -39,11 +39,14 @@ class SpokeStore:
             CREATE TABLE IF NOT EXISTS received(id TEXT PRIMARY KEY, recipient TEXT NOT NULL, sender TEXT NOT NULL,
                 type TEXT NOT NULL, hops INTEGER NOT NULL, status TEXT NOT NULL, at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY, tool TEXT NOT NULL, name TEXT NOT NULL,
-                account TEXT NOT NULL, cwd TEXT NOT NULL, session_id TEXT NOT NULL, delivery TEXT NOT NULL,
+                cwd TEXT NOT NULL, session_id TEXT NOT NULL, delivery TEXT NOT NULL,
                 started_at REAL NOT NULL, last_seen REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
                 body TEXT NOT NULL, size INTEGER NOT NULL, at REAL NOT NULL);
         ''')
+        # 0.4.0 stored an account label per agent; it is no longer used.
+        if 'account' in {row[1] for row in self.db.execute('PRAGMA table_info(agents)')}:
+            self.db.execute('ALTER TABLE agents DROP COLUMN account')
 
     def _setting(self, key):
         row = self.db.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
@@ -96,8 +99,8 @@ class SpokeStore:
         self.db.execute('DELETE FROM received WHERE at < ?', (time.time() - 30 * 86400,))
 
     def save_agent(self, agent):
-        self.db.execute('INSERT OR REPLACE INTO agents VALUES (?,?,?,?,?,?,?,?,?)',
-                        (agent.id, agent.tool, agent.name, agent.account, agent.cwd, agent.session_id,
+        self.db.execute('INSERT OR REPLACE INTO agents VALUES (?,?,?,?,?,?,?,?)',
+                        (agent.id, agent.tool, agent.name, agent.cwd, agent.session_id,
                          agent.delivery, agent.started_at, agent.last_seen))
 
     def known_agents(self):
@@ -139,7 +142,6 @@ class Agent:
     host: str
     tool: str
     name: str
-    account: str = ''
     cwd: str = ''
     session_id: str = ''
     delivery: str = 'push'  # push into the open session, or 'box' (mailbox files only)
@@ -152,7 +154,7 @@ class Agent:
         return 'online' if self.conn else 'offline'
 
     def public(self):
-        return {'id': self.id, 'host': self.host, 'tool': self.tool, 'name': self.name, 'account': self.account,
+        return {'id': self.id, 'host': self.host, 'tool': self.tool, 'name': self.name,
                 'cwd': self.cwd, 'session_id': self.session_id, 'started_at': self.started_at,
                 'last_seen': self.last_seen, 'status': self.status, 'delivery': self.delivery}
 
@@ -203,7 +205,7 @@ class Spoke:
         self.uplink = uplink or (OutboxUplink(self) if accept_links else None)
         self.accept_links = accept_links
         # Registered agents survive restarts as offline entries so their mailbox keeps receiving.
-        fields = ('id', 'tool', 'name', 'account', 'cwd', 'session_id', 'delivery', 'started_at', 'last_seen')
+        fields = ('id', 'tool', 'name', 'cwd', 'session_id', 'delivery', 'started_at', 'last_seen')
         self.agents = {row['id']: Agent(host=self.host, **{k: row[k] for k in fields}) for row in store.known_agents()}
         self.link = None
         self.extra_ops = {}
@@ -322,7 +324,7 @@ class Spoke:
         if not isinstance(session_id, str) or not session_id:
             return None
         row = self.store.agent_for_session(session_id)
-        return {k: row[k] for k in ('name', 'tool', 'account', 'delivery')} if row else None
+        return {k: row[k] for k in ('name', 'tool', 'delivery')} if row else None
 
     def register(self, conn, frame):
         tool, name = check_tool(frame.get('tool')), check_name(frame.get('name'))
@@ -335,7 +337,7 @@ class Spoke:
             raise ProtocolError('invalid', f'{identifier} is already online in another session; choose another name')
         if conn.agent and conn.agent.id != identifier and conn.agent.conn is conn:
             conn.agent.conn = None  # renaming this session
-        text = {k: str(frame.get(k) or '')[:256] for k in ('account', 'cwd', 'session_id')}
+        text = {k: str(frame.get(k) or '')[:256] for k in ('cwd', 'session_id')}
         agent = Agent(identifier, self.host, tool, name, delivery=delivery, conn=conn, **text)
         self.agents[identifier] = agent
         self.store.save_agent(agent)
@@ -411,7 +413,7 @@ class Spoke:
                 self.log('push_failed', id=message['id'], to=agent.id, code=error.code)
         if status is None:
             # Mailbox fallback: closed session, box-only session, or a failed push.
-            self.box.put(message, agent.account)
+            self.box.put(message)
             status = 'stored' if agent.conn else 'stored_offline'
         self.store.remember(message, status)
         self.log('delivered', id=message['id'], to=agent.id, status=status)
@@ -433,7 +435,7 @@ class Spoke:
 
 def matches(agent, filter_text):
     needle = (filter_text or '').lower()
-    return not needle or any(needle in str(agent.get(k, '')).lower() for k in ('id', 'account', 'status', 'cwd'))
+    return not needle or any(needle in str(agent.get(k, '')).lower() for k in ('id', 'status', 'cwd'))
 
 
 class OutboxUplink:

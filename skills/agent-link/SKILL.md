@@ -13,9 +13,9 @@ The user's text after `/agent-link` / `$agent-link` is usually `<agent> <message
 
 Call `whoami` first. If `registered` is false:
 
-1. Ask the user, in one short question, for this session's **name** and **account label** (e.g. `project-head`, `work`). Never invent or guess them. A name is 1-64 characters of letters, digits, `_ . -`.
+1. Ask the user, in one short question, for this session's **name** (e.g. `project-head`). If the session was named with `/rename`, offer that name. Never invent or guess it. A name is 1-64 characters of letters, digits, `_ . -`.
 2. Codex only: find the thread for push. Run `printenv CODEX_THREAD_ID`. If it prints an ID, pass it as `thread_id`. If it is empty, ask the user to name the session with `/rename <name>` and pass that name as `thread_id`. Without it, messages for this session go to the mailbox only.
-3. Call `register(name, account, thread_id?)` and tell the user the resulting ID and mailbox folder.
+3. Call `register(name, thread_id?)` and tell the user the resulting ID and mailbox folder.
 4. If `push.available` is false, explain once:
    - Claude: start Claude Code with `claude --dangerously-load-development-channels server:agent-link` to receive messages live in this session. Until then they are saved to the mailbox.
    - Codex: the thread is unknown (step 2), so messages are saved to the mailbox.

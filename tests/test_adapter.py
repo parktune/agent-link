@@ -74,8 +74,8 @@ class AdapterTests(Environment):
         tasks = [asyncio.create_task(a.run()) for a in (with_thread, without)]
         try:
             await until(lambda: with_thread.client.connected and without.client.connected)
-            await with_thread.register('trainer', 'work', thread_id='0199-abc')
-            await without.register('notes', 'personal')
+            await with_thread.register('trainer', thread_id='0199-abc')
+            await without.register('notes')
             self.assertEqual((with_thread.whoami()['push']['available'], without.whoami()['push']['available']), (True, False))
             sender = await self.session('gpu1', 'claude', 'alpha')
             self.assertEqual((await sender.send('codex:trainer', 'train'))['status'], 'delivered')
@@ -84,7 +84,6 @@ class AdapterTests(Environment):
             self.assertEqual((await sender.send('codex:notes', 'note'))['status'], 'stored')
             box = await without.call('check_box', {})
             self.assertEqual([m['content'] for m in box['messages']], ['note'])
-            self.assertEqual(box['messages'][0]['account'], 'personal')
         finally:
             for task in tasks:
                 task.cancel()
@@ -99,7 +98,7 @@ class AdapterTests(Environment):
             first = Adapter('claude', self.root / 'gpu1/s.sock', channel=False)
             task = asyncio.create_task(first.run())
             await until(lambda: first.client.connected)
-            await first.register('head', 'work')
+            await first.register('head')
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             await first.client.close()
@@ -147,7 +146,7 @@ class StdioTests(Environment):
                              {'whoami', 'register', 'list_agents', 'send_message', 'check_box', 'recent_messages'})
             await until(lambda: True)
             await asyncio.sleep(0.3)  # adapter connects to the daemon in the background
-            registered = await call(3, 'tools/call', {'name': 'register', 'arguments': {'name': 'head', 'account': 'work'}})
+            registered = await call(3, 'tools/call', {'name': 'register', 'arguments': {'name': 'head'}})
             self.assertFalse(registered['result'].get('isError'), registered)
             sender = await self.session('gpu1', 'claude', 'alpha')
             self.assertEqual((await sender.send('head', '안녕'))['status'], 'delivered')

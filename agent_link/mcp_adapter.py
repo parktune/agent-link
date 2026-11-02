@@ -81,13 +81,13 @@ class Adapter:
         if self.registration is None and self.session_id:
             found = (await self.client.request('lookup', session_id=self.session_id)).get('agent')
             if found and found['tool'] == self.tool:
-                self.registration = {'name': found['name'], 'account': found['account']}
+                self.registration = {'name': found['name']}
         if self.registration:
             await self._register()
 
     async def _register(self):
         reply = await self.client.request(
-            'register', tool=self.tool, name=self.registration['name'], account=self.registration['account'],
+            'register', tool=self.tool, name=self.registration['name'],
             cwd=os.getcwd(), session_id=self.session_id or self.thread,
             delivery='push' if self.push_status()['available'] else 'box')
         self.identity = {'id': reply['id'], 'box': reply['box']}
@@ -96,13 +96,13 @@ class Adapter:
     # ---- tools ------------------------------------------------------------------------------
     def whoami(self):
         return {'registered': self.identity is not None, **(self.identity or {}), 'tool': self.tool,
-                'account': (self.registration or {}).get('account', ''), 'session_id': self.session_id,
+                'session_id': self.session_id,
                 'daemon_connected': self.client.connected, 'push': self.push_status()}
 
-    async def register(self, name, account='', thread_id=''):
+    async def register(self, name, thread_id=''):
         if self.tool == 'codex' and thread_id:
             self.thread = thread_id
-        self.registration = {'name': name, 'account': account}
+        self.registration = {'name': name}
         if not self.client.connected:
             raise ProtocolError('offline', 'agent-link daemon is not running on this machine; the registration '
                                 'is kept and sent when it starts')
@@ -117,7 +117,7 @@ class Adapter:
         if name == 'whoami':
             return self.whoami()
         if name == 'register':
-            return await self.register(args['name'], args.get('account', ''), args.get('thread_id', ''))
+            return await self.register(args['name'], args.get('thread_id', ''))
         if name == 'list_agents':
             return (await self.client.request('list', filter=args.get('filter', '')))['agents']
         if name == 'recent_messages':
@@ -137,11 +137,11 @@ class Adapter:
 TOOLS = [
     ('whoami', 'Show whether this session is registered in agent-link, its agent ID, mailbox folder and push status.',
      {}, []),
-    ('register', 'Register this session under a name (and account label) so other agents can message it. '
-     'Ask the user for the name and account; never invent them. Codex: pass thread_id (CODEX_THREAD_ID or the '
+    ('register', 'Register this session under a name so other agents can message it. '
+     'Ask the user for the name; never invent it. Codex: pass thread_id (CODEX_THREAD_ID or the '
      '/rename session name) to enable push.',
-     {'name': {'type': 'string'}, 'account': {'type': 'string'}, 'thread_id': {'type': 'string'}}, ['name']),
-    ('list_agents', 'List agent sessions known to agent-link (ID host:tool:name, account, status, delivery). '
+     {'name': {'type': 'string'}, 'thread_id': {'type': 'string'}}, ['name']),
+    ('list_agents', 'List agent sessions known to agent-link (ID host:tool:name, status, delivery). '
      'On the local PC this covers every host; on a server only that host.',
      {'filter': {'type': 'string'}}, []),
     ('send_message', 'Send a message to another agent and return immediately with its message_id and status '

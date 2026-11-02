@@ -18,7 +18,7 @@ $agent-link trainer 체크포인트 경로 알려줘
 /agent-link            ← 받은 메시지(박스) 확인
 ```
 
-- 세션에서 처음 쓰면 이 세션의 **이름**과 **계정 라벨**을 묻고 등록합니다. 세션 ID는 `호스트:도구:이름`입니다(예: `gpu-server-1:claude:project-head`, 로컬 PC는 `local:claude:main`).
+- 세션에서 처음 쓰면 이 세션의 **이름**을 묻고 등록합니다. 세션 ID는 `호스트:도구:이름`입니다(예: `gpu-server-1:claude:project-head`, 로컬 PC는 `local:claude:main`).
 - 보낸 세션은 기다리지 않고 하던 일을 계속합니다. 회신은 나중에 도착합니다.
 - **받는 쪽:** 세션이 열려 있으면 그 세션에 바로 들어갑니다.
   - Claude: `claude --dangerously-load-development-channels server:agent-link`로 시작한 세션이어야 합니다.
@@ -26,7 +26,7 @@ $agent-link trainer 체크포인트 경로 알려줘
 - 바로 넣을 수 없으면 박스에 저장합니다. 세션이 닫혀 있거나, push가 안 되는 세션이거나, push가 실패한 경우입니다.
   - 로컬 PC: `<repo>/hub/<tool>-<name>/received/*.md`
   - 서버: `<repo>/spoke/<tool>-<name>/received/*.md`
-  - 메시지 1건이 Markdown 파일 1개이고 계정은 파일 머리말에 있습니다. `/agent-link`로 확인하면 `received/read/`로 옮깁니다.
+  - 메시지 1건이 Markdown 파일 1개입니다. `/agent-link`로 확인하면 `received/read/`로 옮깁니다.
 - 서버 세션은 기본적으로 **받은 요청에 대한 회신만** 보낼 수 있습니다(`allow_origination`). 회신에 다시 회신하는 것은 거부합니다(에이전트 간 무한 핑퐁 방지).
 
 ## 설치와 연결
