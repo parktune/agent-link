@@ -10,6 +10,7 @@ import time
 import tomllib
 
 ORIGINATION = ('none', 'host', 'all')
+RETIRED_KEYS = ('mirror_local_metadata',)
 
 
 def state_root():
@@ -48,7 +49,6 @@ def open_db(path):
 class Config:
     host_name: str = ''
     allow_origination: str = 'all'
-    mirror_local_metadata: bool = True
     max_content_bytes: int = 65536
     max_hops: int = 3
     outbox_max_items: int = 1000
@@ -65,6 +65,8 @@ class Config:
             with path.open('rb') as handle:
                 values = tomllib.load(handle)
         known = {f.name for f in fields(cls)}
+        for retired in RETIRED_KEYS:  # accepted and ignored so an older config.toml still loads
+            values.pop(retired, None)
         unknown = set(values) - known
         if unknown:
             raise ValueError(f'Unknown config keys in {path}: {", ".join(sorted(unknown))}')

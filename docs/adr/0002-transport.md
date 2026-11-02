@@ -9,7 +9,6 @@
 - 다시 연결할 때는 1초에서 시작해 최대 60초까지 지수 백오프에 ±20% 지터를 더한다. 호스트마다 독립된 asyncio 태스크로 돈다.
 - `ControlMaster`는 끈다(`ControlMaster=no`, `ControlPath=none`). 유지 세션 자체가 연결 재사용을 대신하고, 다른 SSH 세션과 섞이지 않게 하기 위해서다.
 - 전송은 `Transport` 인터페이스(`agent_link/hub.py`)로 추상화했다. 테스트는 같은 인터페이스로 endpoint를 SSH 없이 직접 실행한다.
-- 스트림을 유지할 수 없는 환경을 위해 `mode=poll`(짧은 `exchange` 세션, 활동 중 1초·유휴 시 최대 10초)을 둔다.
 
 ## 근거
 

@@ -98,14 +98,14 @@ class Environment(unittest.IsolatedAsyncioTestCase):
         await self.hub.close()
         self.hub = None
 
-    def enroll(self, host, mode='stream'):
+    def enroll(self, host):
         token = secrets.token_urlsafe(32)
         spoke = self.spokes[host]
         code, _ = spoke.store.invite()
         spoke.store.enroll(code, token)
         from agent_link.hub import HubStore
         store = HubStore(self.root / 'hub' / 'hub.sqlite3')
-        store.add_host(host, host, '/unused', token, mode=mode)
+        store.add_host(host, host, '/unused', token)
         store.db.close()
         return token
 

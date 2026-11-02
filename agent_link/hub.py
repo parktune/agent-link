@@ -19,7 +19,6 @@ HELLO_TIMEOUT = 5
 PING_INTERVAL = 15
 IDLE_LIMIT = 45
 BACKOFF_MAX = 60
-POLL_ACTIVE, POLL_IDLE = 1, 10
 
 
 def hub_identity():
@@ -172,7 +171,7 @@ class HostLink:
 
     def status(self):
         return {'host': self.name, 'connected': self.connected, 'reconnects': self.reconnects,
-                'last_error': self.last_error, 'last_error_detail': self.last_error_detail, 'mode': 'stream'}
+                'last_error': self.last_error, 'last_error_detail': self.last_error_detail}
 
     def hello(self):
         # `host` tells the server the name it was paired under, so it can keep it or explain a mismatch.
@@ -301,77 +300,6 @@ class HostLink:
         return reply
 
 
-class PollLink(HostLink):
-    """Fallback (8.4): short `exchange` sessions, 1 s while active and up to 10 s when idle."""
-
-    def __init__(self, hub, record, transport):
-        super().__init__(hub, record, transport)
-        self.queue = []
-        self.wake = asyncio.Event()
-
-    def status(self):
-        return {**super().status(), 'mode': 'poll'}
-
-    async def run(self):
-        interval = POLL_ACTIVE
-        while True:
-            try:
-                active = await self.exchange()
-                self.connected, self.last_error, self.last_error_detail = True, None, None
-                interval = POLL_ACTIVE if active else min(interval * 2, POLL_IDLE)
-            except asyncio.CancelledError:
-                raise
-            except (ProtocolError, OSError, ConnectionError, TimeoutError, ValueError) as error:
-                self.last_error = getattr(error, 'code', type(error).__name__)
-                self.last_error_detail = getattr(error, 'detail', None) or str(error) or None
-                self.disconnected()
-                interval = min(max(interval, 1) * 2, BACKOFF_MAX)
-            self.wake.clear()
-            try:
-                await asyncio.wait_for(self.wake.wait(), interval * random.uniform(0.8, 1.2))
-            except TimeoutError:
-                pass
-
-    async def exchange(self):
-        batch, self.queue = self.queue[:16], self.queue[16:]
-        reader, writer, process = await asyncio.wait_for(self.transport.open(), CONNECT_TIMEOUT)
-        try:
-            hello = await handshake(reader, writer, self.hello())
-            self.check_hello(hello)
-            after = self.hub.store.last_seq(self.name)
-            writer.write(encode({'op': 'exchange', 'after': after, 'deliver': [m for m, _ in batch]}))
-            await writer.drain()
-            async def exchange_reply():
-                # The daemon may push outbox/presence frames first; the cursor makes them redundant here.
-                while (frame := await read_frame(reader)) is not None:
-                    if frame['op'] in ('exchange_ok', 'error'):
-                        return frame
-            reply = await asyncio.wait_for(exchange_reply(), CONNECT_TIMEOUT + 25)
-        except BaseException:
-            self.queue = batch + self.queue
-            raise
-        finally:
-            await close_process(writer, process)
-        if not reply or reply['op'] != 'exchange_ok':
-            raise ProtocolError('invalid', 'unexpected exchange reply')
-        for (message, future), result in zip(batch, reply.get('results') or []):
-            if not future.done():
-                future.set_result(result)
-        self.hub.update_presence(self.name, reply.get('presence') or [])
-        for frame in reply.get('outbox') or []:
-            await self.hub.handle_outbox(self.name, frame)
-        return bool(batch or reply.get('outbox'))
-
-    async def deliver(self, message, timeout):
-        future = asyncio.get_running_loop().create_future()
-        self.queue.append((message, future))
-        self.wake.set()
-        try:
-            return await asyncio.wait_for(future, timeout)
-        except TimeoutError:
-            raise ProtocolError('timeout', f'{self.name} did not confirm delivery') from None
-
-
 async def drain(process):
     # Endpoint stderr is discarded: it may echo remote details we do not want in hub logs.
     if process and process.stderr:
@@ -386,9 +314,6 @@ class HubUplink:
     async def route(self, message):
         return await self.hub.route(message, LOCAL_HOST)
 
-    async def report(self, meta):
-        self.hub.store.record(meta, 'local', 'delivered')
-
 
 class Hub:
     def __init__(self, config, root, log, box_root, transport_factory=transport_for):
@@ -396,7 +321,7 @@ class Hub:
         self.root = Path(root)
         self.store = HubStore(self.root / 'hub.sqlite3')
         # The local PC drives the system: its sessions may always originate requests.
-        local_config = replace(config, host_name=LOCAL_HOST, mirror_local_metadata=True, allow_origination='all')
+        local_config = replace(config, host_name=LOCAL_HOST, allow_origination='all')
         self.local = Spoke(local_config, SpokeStore(self.root / 'local.sqlite3'), log, Box(box_root),
                            uplink=HubUplink(self), accept_links=False)
         self.local.list_agents = self.list_agents
@@ -419,8 +344,7 @@ class Hub:
         self.store.db.close()
 
     def add_link(self, record):
-        cls = PollLink if record.get('mode') == 'poll' else HostLink
-        link = cls(self, record, self.transport_factory(record))
+        link = HostLink(self, record, self.transport_factory(record))
         self.links[record['name']] = link
         link.start()
         return link
@@ -444,7 +368,7 @@ class Hub:
         """Tell each connected server about the agents on every other host, when that list changed."""
         agents = self.all_agents()
         for name, link in self.links.items():
-            if not link.connected or 'directory' not in link.caps or isinstance(link, PollLink):
+            if not link.connected or 'directory' not in link.caps:
                 continue  # servers before 0.6.5 would drop the connection on an unknown frame
             entries = directory_entries(agents, exclude_host=name)
             if entries != link.directory_sent:
@@ -470,7 +394,7 @@ class Hub:
         hosts = []
         for record in self.store.hosts():
             link = self.links.get(record['name'])
-            hosts.append({'name': record['name'], 'alias': record['alias'], 'mode': record['mode'],
+            hosts.append({'name': record['name'], 'alias': record['alias'],
                           'registered_at': record['registered_at'], 'last_seq': record['last_seq'],
                           **(link.status() if link else {'connected': False})})
         return {'op': 'hosts', 'hosts': hosts, 'pid': os.getpid()}
@@ -526,7 +450,7 @@ class Hub:
                 link = self.links.get(host)
                 if link is None:
                     raise ProtocolError('not_found', f'unknown host {host}')
-                if not link.connected and not isinstance(link, PollLink):
+                if not link.connected:
                     raise ProtocolError('offline', f'host {host} is not connected')
                 reply = await link.deliver(message, self.config.deliver_timeout)
                 if reply['op'] == 'error':
@@ -545,20 +469,15 @@ class Hub:
         if seq <= self.store.last_seq(host):
             return {'op': 'ack', 'seq': seq}  # already processed before a reconnect or hub restart
         result = None
-        if 'meta' in frame:
-            meta = frame['meta']
-            if isinstance(meta, dict) and str(meta.get('from', '')).startswith(f'{host}:'):
-                self.store.record({**meta, 'size': int(meta.get('size', 0))}, f'{host}(local)', 'delivered')
-        else:
-            message = frame.get('msg')
-            try:
-                validate_message(message, self.config.max_content_bytes)
-                if parse_target(message['from'])[0] != host:
-                    raise ProtocolError('unauthorized', 'sender does not belong to this host')
-                result = await self.route(message, host)
-            except ProtocolError as error:
-                result = {'id': message.get('id') if isinstance(message, dict) else None,
-                          'error': error.code, 'detail': error.detail}
+        message = frame.get('msg')
+        try:
+            validate_message(message, self.config.max_content_bytes)
+            if parse_target(message['from'])[0] != host:
+                raise ProtocolError('unauthorized', 'sender does not belong to this host')
+            result = await self.route(message, host)
+        except ProtocolError as error:
+            result = {'id': message.get('id') if isinstance(message, dict) else None,
+                      'error': error.code, 'detail': error.detail}
         self.store.set_last_seq(host, seq)
         return {'op': 'ack', 'seq': seq, 'result': result}
 

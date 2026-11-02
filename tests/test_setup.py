@@ -263,3 +263,29 @@ class ResumeTests(unittest.TestCase):
         self.assertIn('No Claude session named "nobody"', result.stderr)
         result, _ = self.run_cli('--resume', 'x', 'status')
         self.assertNotEqual(result.returncode, 0)
+
+
+class UpdateTests(unittest.TestCase):
+    def test_server_command_runs_in_the_clone_of_its_paired_path(self):
+        from agent_link.cli import installed_version, remote_update_command
+        command = remote_update_command('/srv/a b/agent-link/.venv/bin/agent-link')
+        self.assertTrue(command.startswith("cd '/srv/a b/agent-link' && git pull --ff-only && ./setup.sh && "
+                                           ".venv/bin/agent-link up --restart"))
+        self.assertEqual(installed_version('[1/4] x\n[2/4] installed agent-link 0.7.0\n[3/4] y'), '0.7.0')
+        self.assertIsNone(installed_version('nothing here'))
+
+    def test_dry_run_only_prints_the_plan(self):
+        with tempfile.TemporaryDirectory(prefix='al-') as state:
+            env = {**os.environ, 'AGENT_HUB_STATE': state}
+            result = subprocess.run([sys.executable, '-m', 'agent_link', 'update', '--dry-run'], env=env,
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('would run: git -C', result.stdout)
+            self.assertIn('setup.sh', result.stdout)
+            self.assertNotIn('installed', result.stdout)
+
+    def test_retired_config_keys_still_load(self):
+        from agent_link.state import Config
+        with tempfile.TemporaryDirectory() as root:
+            Path(root, 'config.toml').write_text('mirror_local_metadata = false\nmax_hops = 2\n')
+            self.assertEqual(Config.load(root).max_hops, 2)

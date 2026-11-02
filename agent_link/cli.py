@@ -1,10 +1,9 @@
 """The `agent-link` command: `agent-link hub ...` on the local PC, the other subcommands on each server."""
 import argparse
 import asyncio
-import getpass
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import secrets
 import shlex
 import shutil
@@ -14,7 +13,7 @@ import subprocess
 import sys
 import time
 
-from .box import Box, Stopped, default_box_root, wait_for_mail
+from .box import REPO_ROOT, Box, Stopped, default_box_root, wait_for_mail
 from .client import SpokeClient
 from .endpoint import relay
 from .hub import CONNECT_TIMEOUT, Hub, HubStore, SSHTransport, close_process, handshake, hub_identity
@@ -161,13 +160,7 @@ async def add_host(args, store):
     host_name = args.name or (args.alias if NAME.fullmatch(args.alias) else None)
     steps, options = preflight(args.alias, args.ssh_config)
     say(f'[1/4] {args.alias}: DNS {steps["dns"]}, TCP {steps["tcp"]}')
-    if args.code:
-        if not args.remote_path:
-            raise SystemExit('--code needs --remote-path (no SSH shell is used to look it up)')
-        remote = {'path': args.remote_path, 'host': None, 'started': None,
-                  'code': getpass.getpass('Invitation code from `agent-link invite` on the server: ')}
-    else:
-        remote = remote_up(args.admin_alias or args.alias, args.remote_path, host_name, args.ssh_config)
+    remote = remote_up(args.admin_alias or args.alias, args.remote_path, host_name, args.ssh_config)
     remote_path = args.remote_path or remote['path']
     started = {None: 'already running', 'systemd': 'started (systemd user service)',
                'background': 'started (background process; add a systemd user service to survive reboots)'}
@@ -178,7 +171,7 @@ async def add_host(args, store):
     name = check_name(enrolled.get('host', ''), 'host')
     if store.host(name):
         raise SystemExit(f'host name {name} is already registered; remove-host first')
-    store.add_host(name, args.alias, remote_path, token, args.remote_socket, args.mode, args.ssh_config)
+    store.add_host(name, args.alias, remote_path, token, args.remote_socket, ssh_config=args.ssh_config)
     hello = await one_shot(transport, {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token, 'hub': hub_identity(),
                                        'host': name})
     if hello.get('op') != 'hello_ok':
@@ -201,7 +194,7 @@ async def add_host(args, store):
 
 def add_host_args(alias, ssh_config=None):
     return argparse.Namespace(alias=alias, name=None, remote_path=None, remote_socket=None, admin_alias=None,
-                              code=False, mode='stream', ssh_config=ssh_config)
+                              ssh_config=ssh_config)
 
 
 def discover_hosts(args, store):
@@ -405,13 +398,7 @@ def run_spoke(args):
         except KeyboardInterrupt:
             pass
         return 0
-    if args.command == 'invite':
-        code, expires = store.invite()
-        if args.json:
-            print(json.dumps({'code': code, 'expires': expires}), flush=True)
-        else:
-            print(f'Invitation code (one use, 5 minutes): {code}', flush=True)
-    elif args.command == 'revoke':
+    if args.command == 'revoke':
         removed = store.revoke()
         try:
             asyncio.run(ask(default_socket(), 'drop_link'))
@@ -469,9 +456,11 @@ def build_parser():
                         'not paired yet (default: short hostname)')
     daemon.add_argument('--force', action='store_true', help='Run even though this machine is set up as the hub')
     commands.add_parser('endpoint', help='Server: SSH forced command the hub runs').add_argument('--socket', type=Path)
-    invite = commands.add_parser('invite', help='Server: issue a one-use invitation code (5 minutes)')
-    invite.add_argument('--json', action='store_true', help='Machine output for agent-link hub add-host')
     commands.add_parser('revoke', help='Server: delete the hub peer token and drop the hub connection')
+    update = commands.add_parser('update', help='git pull + setup.sh + restart here; on the hub PC also every server')
+    update.add_argument('--hosts', help='On the hub PC: only these servers (comma-separated names or aliases)')
+    update.add_argument('--local-only', action='store_true', help='Only this machine, not the servers')
+    update.add_argument('--dry-run', action='store_true', help='Print the plan only')
     wait = commands.add_parser('wait-box', help='Wait until a mailbox folder has unread mail, print one line, exit')
     wait.add_argument('--box', type=Path, required=True, help='The received/ folder shown by whoami')
     wait.add_argument('--interval', type=float, default=2.0, help='Seconds between checks')
@@ -491,8 +480,6 @@ def build_parser():
     add.add_argument('--remote-path', help='agent-link on the server, if not found automatically')
     add.add_argument('--remote-socket', help='Daemon socket on the server, if not the default')
     add.add_argument('--admin-alias', help='SSH alias with shell access used only to issue the invitation')
-    add.add_argument('--code', action='store_true', help='Enter an invitation code by hand instead')
-    add.add_argument('--mode', choices=['stream', 'poll'], default='stream')
     add.add_argument('--ssh-config')
     discover = hub.add_parser('discover', help='Pick servers from ~/.ssh/config (Space to pick, Enter to apply)')
     discover.add_argument('--ssh-config', help='SSH config to read (default ~/.ssh/config)')
@@ -562,6 +549,99 @@ def show_status(socket_path, as_json=False):
     else:
         print(format_status(info), flush=True)
     return 0
+
+
+# ---- update ---------------------------------------------------------------------------------
+def tail(text, lines=6):
+    return '\n'.join((text or '').strip().splitlines()[-lines:])
+
+
+def installed_version(output):
+    for line in (output or '').splitlines():
+        if 'installed agent-link ' in line:
+            return line.rsplit(' ', 1)[-1]
+    return None
+
+
+def update_local(dry_run=False):
+    """git pull + setup.sh in this clone. Returns the installed version."""
+    repo = REPO_ROOT
+    steps = [['git', '-C', str(repo), 'pull', '--ff-only'], [str(repo / 'setup.sh')]]
+    if dry_run:
+        for step in steps:
+            say('  would run: ' + shlex.join(step))
+        return None
+    version = None
+    for step in steps:
+        result = subprocess.run(step, capture_output=True, text=True, timeout=900, cwd=repo)
+        if result.returncode:
+            raise SystemExit(f'{shlex.join(step)} failed:\n{tail(result.stderr or result.stdout)}')
+        version = installed_version(result.stdout) or version
+    return version
+
+
+def remote_update_command(remote_path):
+    """Shell for a server: its clone is two levels above the agent-link it was paired with (.venv/bin/)."""
+    repo = str(PurePosixPath(remote_path).parents[2])
+    return (f'cd {shlex.quote(repo)} && git pull --ff-only && ./setup.sh && .venv/bin/agent-link up --restart >/dev/null '
+            f'&& .venv/bin/python -c "import agent_link; print(\'version\', agent_link.__version__)"')
+
+
+def update_server(record, dry_run=False):
+    command = remote_update_command(record['remote_path'])
+    if dry_run:
+        say(f'  would run on {record["alias"]}: {command}')
+        return None
+    argv = SSHTransport(record['alias'], '/', ssh_config=record.get('ssh_config')).argv()
+    argv[-1] = command
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=900)
+    except subprocess.TimeoutExpired:
+        return 'failed: timed out'
+    if result.returncode:
+        return 'failed: ' + (explain_ssh_failure(result.stderr) if result.returncode == 255 else
+                             tail(result.stderr or result.stdout, 3).replace('\n', ' | '))
+    versions = [line.split()[1] for line in result.stdout.splitlines() if line.startswith('version ')]
+    return f'updated to {versions[-1]}' if versions else 'updated'
+
+
+def run_update(args):
+    """Bring this machine (and, from the hub's PC, every paired server) to the latest commit."""
+    role = machine_role()
+    say(f'agent-link update ({role or "not set up yet"}){" -- dry run" if args.dry_run else ""}')
+    if role == 'hub' and not args.local_only:
+        store = HubStore(private_directory(state_root() / 'hub') / 'hub.sqlite3')
+        records = store.hosts()
+        if args.hosts:
+            wanted = {h.strip() for h in args.hosts.split(',') if h.strip()}
+            unknown = wanted - {r['name'] for r in records} - {r['alias'] for r in records}
+            if unknown:
+                raise SystemExit(f'not paired: {", ".join(sorted(unknown))} (agent-link hub hosts)')
+            records = [r for r in records if r['name'] in wanted or r['alias'] in wanted]
+        # Servers first: they then serve `agent-link endpoint` before the new hub looks for it.
+        results = {}
+        for record in records:
+            say(f'[server] {record["name"]} ...')
+            results[record['name']] = update_server(record, args.dry_run)
+            if results[record['name']]:
+                say(f'  {results[record["name"]]}')
+    say('[this machine] git pull + setup.sh ...')
+    version = update_local(args.dry_run)
+    if version:
+        say(f'  installed {version}')
+    if role in ('hub', 'spoke'):
+        say(f'[this machine] restart the {"hub" if role == "hub" else "daemon"} ...')
+        if not args.dry_run:
+            if service.alive():
+                stop_running()
+            store = spoke_store() if role == 'spoke' else None
+            how = service.start(role, host_name=daemon_host_name(store) if store else None)
+            say(f'  started ({how})')
+    if not args.dry_run and role and service.alive():
+        say('')
+        show_status(default_socket())
+    failed = role == 'hub' and not args.local_only and any(str(v).startswith('failed') for v in results.values())
+    return 1 if failed else 0
 
 
 CHANNEL = ['--dangerously-load-development-channels', 'server:agent-link']
@@ -635,6 +715,8 @@ def agent_link(argv=None):
         parser.error('choose a command (e.g. status, up, hub ...) or --resume SESSION')
     if args.command == 'status':
         return show_status(args.socket or default_socket(), args.json)
+    if args.command == 'update':
+        return run_update(args)
     if args.command == 'hub':
         args.command = args.hub_command
         return run_hub(args)

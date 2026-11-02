@@ -13,7 +13,7 @@ git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup
 - Claude Code·Codex에 스킬과 MCP 서버를 등록합니다.
 - `~/.local/bin`에 `agent-link hub`, `agent-link`를 링크합니다.
 
-업데이트할 때는 clone한 폴더에서 `git pull && ./setup.sh`를 실행합니다. 0.5.x에서 0.6.0으로 올릴 때는 서버를 먼저 올립니다([운영 가이드](docs/operations.md#060으로-올릴-때-hubctl-agent-hub--agent-link)).
+업데이트는 로컬 PC에서 `agent-link update` 한 번이면 됩니다. 등록된 서버를 먼저 SSH로 올리고(`git pull`, `setup.sh`, daemon 재시작) 이 PC를 올린 뒤 hub를 다시 시작합니다. 서버에서 실행하면 그 서버만 올립니다. `--dry-run`으로 계획만, `--local-only`로 이 머신만 올립니다. 0.5.x에서 0.6.0으로 올릴 때는 서버를 먼저 올립니다([운영 가이드](docs/operations.md#060으로-올릴-때-hubctl-agent-hub--agent-link)).
 
 **2. 로컬 PC에서** 서버를 연결합니다. 고르는 방식과 직접 지정하는 방식이 있습니다.
 

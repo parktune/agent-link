@@ -33,17 +33,7 @@ class SameHostTests(Environment):
         with self.assertRaisesRegex(Exception, 'ambiguous'):
             await a.send('head', 'x')
         self.assertEqual((await a.send('codex:head', 'x'))['route'], 'local')
-        self.assertEqual(self.spokes['gpu1'].store.outbox_stats()['items'], 1)  # only the mirrored metadata
-
-    async def test_s13_mirror_reports_metadata_without_body(self):
-        await self.server('gpu1', allow_origination='host')
-        a = await self.session('gpu1', 'claude', 'alpha')
-        await self.session('gpu1', 'claude', 'beta')
-        await a.send('beta', 'secret body')
-        entries = self.spokes['gpu1'].store.outbox_after(0)
-        self.assertEqual(len(entries), 1)
-        self.assertNotIn('secret body', json.dumps(entries))
-        self.assertEqual(entries[0]['meta']['size'], len('secret body'))
+        self.assertEqual(self.spokes['gpu1'].store.outbox_stats()['items'], 0)  # nothing went to the hub
 
     async def test_origination_none_only_allows_replies(self):
         await self.server('gpu1', allow_origination='none')
@@ -239,20 +229,6 @@ class HubTests(Environment):
         ack = await self.hub.handle_outbox('gpu1', {'op': 'outbox', 'seq': 1, 'msg': {}})
         self.assertEqual(ack, {'op': 'ack', 'seq': 1})
         self.assertEqual(len(main.received), 1)
-
-    async def test_poll_mode_exchange(self):
-        await self.server('gpu1')
-        self.enroll('gpu1', mode='poll')
-        await self.start_hub()
-        main = await self.session('local', 'claude', 'main')
-        head = await self.session('gpu1', 'claude', 'head')
-        await until(lambda: any(a['status'] == 'online' for a in self.hub.presence.get('gpu1', [])), timeout=20)
-        self.assertEqual((await main.send('gpu1:claude:head', 'poll q'))['status'], 'delivered')
-        reply = await head.send('local:claude:main', 'poll a', 'reply', head.received[0]['id'])
-        self.assertEqual(reply['status'], 'queued')  # picked up by the next exchange
-        await until(lambda: main.received, timeout=20)
-        self.assertEqual(main.received[0]['content'], 'poll a')
-
 
 class EndpointSecurityTests(Environment):
     async def endpoint(self, frames):

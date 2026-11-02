@@ -32,7 +32,6 @@
 | S10 | 같은 호스트 두 세션(`allow_origination=host`), hub 중단 | `test_s2_s10...` | hub를 끈 상태에서 같은 서버의 두 세션 사이 전송이 된다 |
 | S11 | 호스트 생략 이름이 로컬에 없음 | `test_s11...` | hub로 올라가 다른 호스트로 간다 |
 | S12 | 자기 호스트 명시 + 없음, 동명 2개 | `test_s12...` | `not_found`, `ambiguous` |
-| S13 | `mirror_local_metadata` | `test_s13...` | `agent-link hub log`에 본문 없이 기록된다 |
 | S14 | add-host 실패 경로 | `test_s14...` | known_hosts에서 서버 키를 빼고 add-host를 실행한다. host key 오류로 중단된다 |
 | S15 | 토큰 없음·오류·revoke·허용 외 프레임 | `test_s15_*` | `agent-link revoke` 후 `agent-link hub hosts`에 `unauthorized` |
 | S16 | 스트림 끊김 후 재연결 | `test_s7_s16...` | |

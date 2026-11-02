@@ -14,7 +14,7 @@ Layout:
 |---|---|
 | `agent_link/protocol.py` | IDs, message model, JSON Lines frames, error codes |
 | `agent_link/spoke.py` | Spoke daemon: registry, same-host routing, outbox, hub link session |
-| `agent_link/hub.py` | Hub: global routing, per-host stream/poll links, SSH transport |
+| `agent_link/hub.py` | Hub: global routing, one SSH stream per host, the agent directory for servers |
 | `agent_link/endpoint.py` | SSH forced-command relay with the frame allowlist |
 | `agent_link/box.py` | Mailbox folders |
 | `agent_link/mcp_adapter.py`, `inject.py`, `client.py` | Session adapter (MCP server) and push into Claude/Codex |

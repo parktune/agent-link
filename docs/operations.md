@@ -8,7 +8,7 @@
 git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup.sh
 ```
 
-`setup.sh`는 아래 순서로 처리한다. 이 저장소와 사용자 설정만 바꾼다. 업데이트할 때는 `git pull` 후 다시 실행한다.
+`setup.sh`는 아래 순서로 처리한다. 이 저장소와 사용자 설정만 바꾼다. 업데이트는 `agent-link update`로 한다(로컬 PC에서 실행하면 등록된 서버까지 SSH로 올린다). 직접 하려면 `git pull` 후 다시 실행한다.
 
 1. Python 3.11 이상으로 `.venv`를 만든다. python3.13 → 3.12 → 3.11 → python3 순으로 찾고, 없으면 uv가 있을 때 3.12를 받는다.
 2. `pip install -e .`
@@ -53,8 +53,6 @@ restrict,command="/home/svc/agent-link/.venv/bin/agent-link endpoint" ssh-ed2551
 ```
 
 이 경우 셸 접근이 되는 별도 alias로 초대만 발급한다: `--admin-alias gpu1-admin`.
-SSH로 명령을 실행할 수 없으면 서버에서 `agent-link invite`로 코드를 받아 신뢰된 경로로 옮기고 `agent-link hub add-host gpu1 --remote-path ... --code`의 비표시 프롬프트에 입력한다.
-스트림을 유지할 수 없는 네트워크에서는 `--mode poll`을 쓴다.
 
 일반 셸 권한이 있는 SSH 계정을 쓰면 endpoint의 허용 목록은 그 계정 전체를 sandbox하지 못한다. SSH 키 자체가 셸 접근 권한이다.
 
@@ -73,7 +71,6 @@ agent-link revoke                    # 서버: 토큰 해시 삭제, 현재 연�
 |---|---|---|
 | `host_name` | 페어링한 이름, 없으면 짧은 hostname | 에이전트 ID의 호스트 부분. 정하면 페어링한 이름보다 우선한다 |
 | `allow_origination` | `all` | 서버 세션이 먼저 보낼 수 있는 범위: `all`(모든 호스트), `host`(같은 호스트), `none`(받은 요청에 대한 회신만). 로컬 PC는 항상 `all`. 0.6.5 전에는 기본값이 `none`이었다 |
-| `mirror_local_metadata` | `true` | 같은 호스트 안의 전달을 메타데이터만 hub에 보고 |
 | `max_content_bytes` | 65536 | 본문 상한 |
 | `max_hops` | 3 | hop 상한 |
 | `outbox_max_items` / `outbox_max_bytes` | 1000 / 16 MiB | 넘으면 새 메시지를 `outbox_full`로 거부한다(오래된 것을 버리지 않는다) |

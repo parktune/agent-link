@@ -16,7 +16,7 @@ import secrets
 import time
 
 from .protocol import (HUB_TO_HOST, NAME, PROTOCOL_VERSION, TYPES, FRAME_LIMIT, ProtocolError, agent_id, check_name,
-                       check_tool, make_message, metadata, parse_target, read_frame, validate_message, write_frame)
+                       check_tool, make_message, parse_target, read_frame, validate_message, write_frame)
 from .state import open_db
 
 INVITE_SECONDS = 300
@@ -427,8 +427,6 @@ class Spoke:
                 self.authorize(is_reply, 'host')
                 message['to'] = found[0].id
                 result = await self.deliver_local(message)
-                if self.config.mirror_local_metadata and self.uplink:
-                    await self.uplink.report(metadata(message))
                 self.log('routed_local', id=message['id'], to=message['to'], size=len(content.encode()))
                 return {**result, 'route': 'local'}
             if host == self.host or self.uplink is None:
@@ -514,15 +512,6 @@ class OutboxUplink:
             raise ProtocolError(result['error'], result.get('detail', ''))
         return {'id': message['id'], 'status': result.get('status', 'delivered')}
 
-    async def report(self, meta):
-        try:
-            seq = self._put('meta', meta)
-        except ProtocolError:
-            self.spoke.log('mirror_dropped', id=meta['id'], reason='outbox_full')
-            return
-        if self.spoke.link:
-            await self.spoke.link.send({'op': 'outbox', 'seq': seq, 'meta': meta})
-
     def acked(self, seq, result):
         future = self.waiters.get(seq)
         if future and not future.done():
@@ -598,7 +587,7 @@ class LinkSession:
                 spoke.link.close()  # one hub connection per host; the newest wins
             spoke.link = self
             await self.send({'op': 'hello_ok', 'v': PROTOCOL_VERSION, 'host': spoke.host,
-                             'caps': ['stream', 'exchange', 'mirror', 'directory']})
+                             'caps': ['stream', 'directory']})
             spoke.log('hub_connected', host=spoke.host, hub=self.info, outbox=spoke.store.outbox_stats())
             for frame in spoke.store.outbox_after(0):
                 await self.send(frame)
@@ -634,12 +623,7 @@ class LinkSession:
             spoke.spawn(self._deliver(frame.get('msg')))
         elif op == 'directory':
             spoke.directory = directory_entries(frame.get('agents'), exclude_host=spoke.host)
-        elif op == 'exchange':
-            after = int(frame.get('after', 0))
-            spoke.store.outbox_ack(after)
-            results = [await self._result(message) for message in frame.get('deliver') or []]
-            await self.send({'op': 'exchange_ok', 'results': results, 'outbox': spoke.store.outbox_after(after, 100),
-                             'presence': spoke.presence()['agents']})
+
 
     async def _result(self, message):
         try:

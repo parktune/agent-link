@@ -15,8 +15,8 @@ MESSAGE_FIELDS = frozenset({'id', 'from', 'to', 'type', 'in_reply_to', 'content'
 FRAME_LIMIT = 1 << 20
 
 # hub -> host frames the endpoint lets through (8.3). `ping` is a keepalive addition.
-HUB_TO_HOST = frozenset({'hello', 'enroll', 'deliver', 'ack', 'exchange', 'ping', 'directory'})
-HOST_TO_HUB = frozenset({'hello_ok', 'enroll_ok', 'delivered', 'error', 'outbox', 'presence', 'exchange_ok', 'pong'})
+HUB_TO_HOST = frozenset({'hello', 'enroll', 'deliver', 'ack', 'ping', 'directory'})
+HOST_TO_HUB = frozenset({'hello_ok', 'enroll_ok', 'delivered', 'error', 'outbox', 'presence', 'pong'})
 
 ERROR_CODES = frozenset({
     'not_found', 'offline', 'ambiguous', 'too_large', 'hops_exceeded', 'unauthorized', 'reply_to_reply',
@@ -110,12 +110,6 @@ def validate_message(message, max_content=65536):
     if content_size(message) > max_content:
         raise ProtocolError('too_large', f'content exceeds {max_content} bytes')
     return message
-
-
-def metadata(message):
-    """What may leave a host about a locally delivered message: never the body (4.2)."""
-    return {'id': message['id'], 'from': message['from'], 'to': message['to'], 'type': message['type'],
-            'size': content_size(message), 'at': now_iso()}
 
 
 def encode(frame):

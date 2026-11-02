@@ -17,7 +17,6 @@ This is a new, independently unaudited implementation. Pilot it with non-sensiti
 - `add-host` issues a 5-minute, one-use invitation on the server (80-bit code, hash stored, closed
   after 5 wrong attempts) and consumes it immediately over SSH. The code travels only over SSH
   pipes and stays in memory; it is never printed, logged, or put in argv, environment or files.
-  The manual `--code` path reads it from a hidden prompt.
 - The hub generates a 256-bit peer token per host. Servers store only its SHA-256 hash; the hub
   keeps it in its 0600 SQLite database under a 0700 directory. Every endpoint session starts
   with `hello` and is rejected `unauthorized` without a valid token. `agent-link revoke` deletes
@@ -29,7 +28,7 @@ This is a new, independently unaudited implementation. Pilot it with non-sensiti
 
 The recommended setup is a dedicated OS account whose `authorized_keys` entry for the hub key is
 `restrict,command="<abs path>/agent-link endpoint"`. The endpoint passes only the allowlisted frames
-(`hello`, `enroll`, `deliver`, `ack`, `exchange`, `ping`) and has no shell, file, session selection or
+(`hello`, `enroll`, `deliver`, `ack`, `ping`, `directory`) and has no shell, file, session selection or
 turn-start operation. With an ordinary shell-enabled key the allowlist does not sandbox the
 account: the key itself grants a shell.
 
@@ -49,8 +48,7 @@ account: the key itself grants a shell.
   untrusted users.
 - Mailbox files (`<repo>/hub`, `<repo>/spoke`) are 0600 in 0700 folders and git-ignored. They are
   not encrypted at rest.
-- Hub and daemon logs record metadata (id, from, to, size, time, status), never bodies. Same-host
-  deliveries report metadata only to the hub (`mirror_local_metadata`).
+- Hub and daemon logs record metadata (id, from, to, size, time, status), never bodies.
 - Do not put secrets in message bodies: they reach model providers through the receiving session.
 
 ## Reporting
