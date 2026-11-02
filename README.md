@@ -1,24 +1,34 @@
 # agent-link
 
-## 설치
+## 처음 설정
 
-로컬 PC와 각 서버에서 똑같이, 설치할 폴더에서 실행합니다.
+**1. 각 서버(spoke)에서** — 설치만 하면 끝입니다. daemon은 3번에서 로컬 PC가 SSH로 띄웁니다.
 
 ```bash
 git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup.sh
 ```
 
-`setup.sh`가 Python 3.11+ `.venv`를 만들고, Claude Code·Codex에 `/agent-link` 스킬과 MCP 서버를 등록하고, `~/.local/bin`에 `agent-link`를 링크합니다.
+**2. 로컬 PC(hub)에서** — 똑같이 설치합니다.
 
-## 서버 연결 (로컬 PC에서)
+```bash
+git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup.sh
+```
+
+**3. 로컬 PC에서 서버 연결** — 서버마다 한 번입니다. hub도 이때 자동으로 뜹니다.
 
 ```bash
 agent-link hub discover              # ~/.ssh/config 호스트 목록에서 Space로 고르고 Enter
 agent-link hub add-host gpu-server-1 # 또는 alias를 직접 지정
 ```
 
-SSH로 서버에 들어가 daemon을 띄우고, 1회용 초대로 토큰을 등록하고, 로컬 hub를 띄워 연결까지 확인합니다. 호스트 이름은 alias가 됩니다(`--name`으로 변경).
-준비할 것은 하나입니다. `ssh gpu-server-1`이 비밀번호 없이 되고, 서버 host key가 known_hosts에 있어야 합니다.
+**4. 확인** — 로컬 PC에서 `agent-link status`를 실행해 `servers N/N connected`가 나오면 됩니다.
+
+**5. 세션 열기** — 세션을 쓸 머신(PC나 서버)에서 `agent-link claude resume <세션 이름>` 또는 `agent-link codex resume <세션 이름>`을 실행합니다. 아래 사용법을 참고하세요.
+
+- 설치 폴더는 어디든 됩니다. `setup.sh`가 Python 3.11+ `.venv`를 만들고, Claude Code·Codex에 `/agent-link` 스킬과 MCP 서버를 등록하고, `~/.local/bin`에 `agent-link`를 링크합니다.
+- 3번 전에 `ssh gpu-server-1`이 비밀번호 없이 되고, 서버 host key가 known_hosts에 있어야 합니다.
+- `add-host`는 SSH로 서버의 daemon을 띄우고, 1회용 초대로 토큰을 등록하고, 로컬 hub를 띄워 연결까지 확인합니다. 호스트 이름은 alias가 됩니다(`--name`으로 변경).
+- hub와 daemon은 systemd user 서비스로 등록돼 재부팅 후에도 다시 뜹니다.
 
 ## 업데이트·상태
 
