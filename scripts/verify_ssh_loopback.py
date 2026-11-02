@@ -95,21 +95,21 @@ def main():
                     time.sleep(0.1)
             added = subprocess.run(hubctl + ['add-host', 'loop', '--remote-path', str(wrapper), '--ssh-config',
                                              str(root / 'ssh.conf')], env=hub_env, capture_output=True, text=True, timeout=60)
+            hosts_output = subprocess.run(hubctl + ['hosts'], env=hub_env, capture_output=True, text=True, timeout=20)
             if added.returncode:
                 raise SystemExit('add-host failed: ' + added.stderr[-1500:])
-            record = json.loads(added.stdout[added.stdout.index('{', added.stdout.index('}') + 1):])
-            assert record['host'] == 'loopback-srv' and record['verified'], record
-            assert 'restrict,command=' in record['authorized_keys']
-            processes.append(subprocess.Popen(hubctl + ['serve'], env=hub_env,
-                                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
-            wait_for(root / 'hub-state/agent-link.sock')
+            assert '[4/4] hub started and connected to loopback-srv' in added.stdout, added.stdout
+            assert 'restrict,command=' in added.stdout
+            hosts = json.loads(hosts_output.stdout)
             result = asyncio.run(round_trip(root))
-            hosts = json.loads(subprocess.run(hubctl + ['hosts'], env=hub_env, capture_output=True, text=True,
-                                              timeout=20).stdout)
-            print(json.dumps({'transport': 'real OpenSSH loopback', 'add_host': 'auto (invite over SSH)',
+            print(json.dumps({'transport': 'real OpenSSH loopback', 'add_host': 'alias only, hub auto-started',
                               'host_connected': hosts[0]['connected'], **result, 'models_called': False,
                               'system_ssh_modified': False}, ensure_ascii=False))
         finally:
+            # add-host started the hub detached; stop it through the pid it reports.
+            reply = subprocess.run(hubctl + ['hosts', '--pid'], env=hub_env, capture_output=True, text=True, timeout=20)
+            if reply.returncode == 0 and reply.stdout.strip().isdigit():
+                os.kill(int(reply.stdout.strip()), 15)
             for process in reversed(processes):
                 process.terminate()
                 try:

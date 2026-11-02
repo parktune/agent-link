@@ -1,5 +1,6 @@
 """Local hub: global registry, routing between hosts and one connection loop per host (4, 8)."""
 import asyncio
+import os
 from dataclasses import replace
 from pathlib import Path
 import random
@@ -421,7 +422,7 @@ class Hub:
             hosts.append({'name': record['name'], 'alias': record['alias'], 'mode': record['mode'],
                           'registered_at': record['registered_at'], 'last_seq': record['last_seq'],
                           **(link.status() if link else {'connected': False})})
-        return {'op': 'hosts', 'hosts': hosts}
+        return {'op': 'hosts', 'hosts': hosts, 'pid': os.getpid()}
 
     async def _reload_op(self, frame):
         records = {record['name']: record for record in self.store.hosts()}

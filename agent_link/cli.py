@@ -15,7 +15,8 @@ from .box import Box, default_box_root
 from .client import SpokeClient
 from .endpoint import relay
 from .hub import CONNECT_TIMEOUT, Hub, HubStore, SSHTransport, close_process, handshake
-from .protocol import PROTOCOL_VERSION, ProtocolError, check_name
+from .protocol import NAME, PROTOCOL_VERSION, ProtocolError, check_name
+from . import service
 from .spoke import Spoke, SpokeStore
 from .state import Config, default_socket, private_directory, state_root, stderr_log
 
@@ -89,17 +90,39 @@ def explain_ssh_failure(stderr):
     return 'SSH failed: ' + stderr.strip()[-300:]
 
 
-def remote_invite(alias, remote_path, ssh_config=None):
-    argv = SSHTransport(alias, remote_path, ssh_config=ssh_config).argv()
-    argv[-1] = shlex.join([remote_path, 'invite', '--json'])
-    # The code arrives on this pipe and stays in memory: never printed, logged or put in argv/env.
-    result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+# Where `agent-hub` usually lives on a server. The first executable match wins.
+SEARCH = ('"$(command -v agent-hub 2>/dev/null)"', '"$HOME/work/agent-link/.venv/bin/agent-hub"',
+          '"$HOME/agent-link/.venv/bin/agent-hub"', '"$HOME/.local/bin/agent-hub"')
+
+
+def remote_up_command(remote_path, host_name):
+    up = ['up', '--json', '--invite'] + (['--host-name', host_name] if host_name else [])
+    if remote_path:
+        return shlex.join([remote_path] + up)
+    args = shlex.join(up)
+    return (f'for p in {" ".join(SEARCH)}; do if [ -n "$p" ] && [ -x "$p" ]; then '
+            f'exec "$(readlink -f "$p")" {args}; fi; done; echo agent-hub-not-found >&2; exit 3')
+
+
+def remote_up(alias, remote_path, host_name, ssh_config=None):
+    """One SSH call: find agent-hub, start its daemon if needed, issue a one-use invitation.
+
+    The code arrives on this pipe and stays in memory: never printed, logged or put in argv/env.
+    """
+    argv = SSHTransport(alias, '/', ssh_config=ssh_config).argv()
+    argv[-1] = remote_up_command(remote_path, host_name)
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
+    if 'agent-hub-not-found' in result.stderr:
+        raise SystemExit(f'agent-link is not installed on {alias}. On the server run:\n'
+                         '  git clone https://github.com/parktune/agent-link.git ~/work/agent-link && '
+                         '~/work/agent-link/setup.sh\n'
+                         'or pass --remote-path if it lives elsewhere.')
     if result.returncode:
-        raise SystemExit('Invitation failed: ' + explain_ssh_failure(result.stderr))
+        raise SystemExit(f'{alias}: ' + explain_ssh_failure(result.stderr))
     try:
-        return json.loads(result.stdout)['code']
-    except (ValueError, KeyError):
-        raise SystemExit('Invitation failed: unexpected output from agent-hub invite') from None
+        return json.loads(result.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        raise SystemExit(f'{alias}: unexpected output from agent-hub up') from None
 
 
 async def one_shot(transport, frame):
@@ -122,34 +145,53 @@ def authorized_keys_line(options, remote_path, remote_socket):
     return f'restrict,command="{command}" <hub public key>'
 
 
+def say(text):
+    print(text, flush=True)
+
+
 async def add_host(args, store):
-    if not args.remote_path.startswith('/'):
-        raise SystemExit('--remote-path must be the absolute path of agent-hub on the server')
+    if args.remote_path and not args.remote_path.startswith('/'):
+        raise SystemExit('--remote-path must be an absolute path on the server')
+    if any(record['alias'] == args.alias for record in store.hosts()):
+        raise SystemExit(f'{args.alias} is already registered (hubctl hosts); remove-host first to redo it')
+    host_name = args.name or (args.alias if NAME.fullmatch(args.alias) else None)
     steps, options = preflight(args.alias, args.ssh_config)
-    print(json.dumps({'preflight': steps}), flush=True)
+    say(f'[1/4] {args.alias}: DNS {steps["dns"]}, TCP {steps["tcp"]}')
     if args.code:
-        code = getpass.getpass('Invitation code from `agent-hub invite`: ')
+        if not args.remote_path:
+            raise SystemExit('--code needs --remote-path (no SSH shell is used to look it up)')
+        remote = {'path': args.remote_path, 'host': None, 'started': None,
+                  'code': getpass.getpass('Invitation code from `agent-hub invite`: ')}
     else:
-        code = remote_invite(args.admin_alias or args.alias, args.remote_path, args.ssh_config)
+        remote = remote_up(args.admin_alias or args.alias, args.remote_path, host_name, args.ssh_config)
+    remote_path = args.remote_path or remote['path']
+    started = {None: 'already running', 'systemd': 'started (systemd user service)',
+               'background': 'started (background process; add a systemd user service to survive reboots)'}
+    say(f'[2/4] server daemon {started.get(remote["started"], remote["started"])} at {remote_path}')
     token = secrets.token_urlsafe(32)
-    transport = SSHTransport(args.alias, args.remote_path, args.remote_socket, args.ssh_config)
-    enrolled = await one_shot(transport, {'op': 'enroll', 'code': code, 'token': token})
+    transport = SSHTransport(args.alias, remote_path, args.remote_socket, args.ssh_config)
+    enrolled = await one_shot(transport, {'op': 'enroll', 'code': remote['code'], 'token': token})
     name = check_name(enrolled.get('host', ''), 'host')
     if store.host(name):
-        raise SystemExit(f'{name} is already registered; remove-host first')
-    store.add_host(name, args.alias, args.remote_path, token, args.remote_socket, args.mode, args.ssh_config)
+        raise SystemExit(f'host name {name} is already registered; remove-host first')
+    store.add_host(name, args.alias, remote_path, token, args.remote_socket, args.mode, args.ssh_config)
     hello = await one_shot(transport, {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token})
     if hello.get('op') != 'hello_ok':
         raise SystemExit('Token check after enrollment failed')
-    try:
-        await ask(default_socket(), 'reload')
-        reloaded = True
-    except SystemExit:
-        reloaded = False
-    emit({'host': name, 'alias': args.alias, 'verified': True, 'hub_reloaded': reloaded,
-          'authorized_keys': authorized_keys_line(options, args.remote_path, args.remote_socket),
-          'note': 'Give the authorized_keys line to the server administrator for the dedicated account. '
-                  'agent-link never edits SSH configuration.'})
+    say(f'[3/4] enrolled as host "{name}" (token verified)')
+    how = None if service.alive() else service.start('hub')
+    await ask(default_socket(), 'reload')
+    connected = False
+    for _ in range(50):
+        hosts = (await ask(default_socket(), 'hosts'))['hosts']
+        if any(h['name'] == name and h.get('connected') for h in hosts):
+            connected = True
+            break
+        await asyncio.sleep(0.2)
+    say(f'[4/4] hub {"started and " if how else ""}{"connected to" if connected else "connecting to"} {name}')
+    say(f'\nDone. Sessions on that server have IDs like {name}:claude:<name>.')
+    say('Optional hardening: on the server, give a dedicated account this authorized_keys line:\n  '
+        + authorized_keys_line(options, remote_path, args.remote_socket))
 
 
 def hubctl(argv=None):
@@ -157,16 +199,18 @@ def hubctl(argv=None):
     commands = parser.add_subparsers(dest='command', required=True)
     serve = commands.add_parser('serve', help='Run the hub (keep it running, e.g. systemd --user)')
     serve.add_argument('--socket', type=Path)
-    add = commands.add_parser('add-host', help='Register a server reachable by an existing SSH alias')
+    commands.add_parser('up', help='Start the hub in the background (systemd user service if possible)')
+    add = commands.add_parser('add-host', help='Connect a server by its SSH alias (from ~/.ssh/config)')
     add.add_argument('alias')
-    add.add_argument('--remote-path', required=True, help='Absolute path of agent-hub on the server')
+    add.add_argument('--name', help='Host name in agent IDs (default: the alias)')
+    add.add_argument('--remote-path', help='agent-hub on the server, if not found automatically')
     add.add_argument('--remote-socket', help='Daemon socket on the server, if not the default')
     add.add_argument('--admin-alias', help='SSH alias with shell access used only to issue the invitation')
     add.add_argument('--code', action='store_true', help='Enter an invitation code by hand instead')
     add.add_argument('--mode', choices=['stream', 'poll'], default='stream')
     add.add_argument('--ssh-config')
     commands.add_parser('remove-host').add_argument('host')
-    commands.add_parser('hosts')
+    commands.add_parser('hosts').add_argument('--pid', action='store_true', help='Print only the hub process ID')
     agents = commands.add_parser('agents')
     agents.add_argument('filter', nargs='?', default='')
     log = commands.add_parser('log', help='Recent routed message metadata')
@@ -174,6 +218,9 @@ def hubctl(argv=None):
     args = parser.parse_args(argv)
 
     root = private_directory(state_root() / 'hub')
+    if args.command == 'up':
+        emit({'hub': 'already running' if service.alive() else service.start('hub')})
+        return 0
     if args.command == 'serve':
         config = Config.load()
         hub = Hub(config, root, stderr_log(root / 'hub.log'), default_box_root('hub'))
@@ -195,7 +242,8 @@ def hubctl(argv=None):
             pass
         emit({'removed': args.host, 'note': f'Also run `agent-hub revoke` on {args.host}; SSH keys are managed separately.'})
     elif args.command == 'hosts':
-        emit(asyncio.run(ask(default_socket(), 'hosts'))['hosts'])
+        reply = asyncio.run(ask(default_socket(), 'hosts'))
+        print(reply['pid']) if args.pid else emit(reply['hosts'])
     elif args.command == 'agents':
         emit(asyncio.run(ask(default_socket(), 'list', filter=args.filter))['agents'])
     elif args.command == 'log':
@@ -204,6 +252,15 @@ def hubctl(argv=None):
 
 
 # ---- agent-hub ------------------------------------------------------------------------------
+def configured_host_name():
+    path = state_root() / 'config.toml'
+    if not path.exists():
+        return None
+    import tomllib
+    with path.open('rb') as handle:
+        return tomllib.load(handle).get('host_name') or None
+
+
 def spoke_store():
     return SpokeStore(private_directory(state_root() / 'spoke') / 'spoke.sqlite3')
 
@@ -214,6 +271,10 @@ def agent_hub(argv=None):
     daemon = commands.add_parser('daemon', help='Run the spoke daemon (one per host)')
     daemon.add_argument('--socket', type=Path)
     daemon.add_argument('--host-name', help='Host name in agent IDs (default: config or short hostname)')
+    up = commands.add_parser('up', help='Start the daemon in the background if it is not running')
+    up.add_argument('--host-name', help='Host name in agent IDs when starting (config host_name wins)')
+    up.add_argument('--invite', action='store_true', help='Also issue a one-use invitation (for hubctl add-host)')
+    up.add_argument('--json', action='store_true')
     commands.add_parser('endpoint', help='SSH forced command').add_argument('--socket', type=Path)
     invite = commands.add_parser('invite', help='Issue a one-use invitation code (5 minutes)')
     invite.add_argument('--json', action='store_true', help='Machine output for hubctl add-host')
@@ -224,6 +285,19 @@ def agent_hub(argv=None):
     if args.command == 'endpoint':
         return asyncio.run(relay(args.socket or default_socket()))
     store = spoke_store()
+    if args.command == 'up':
+        how = None
+        if not service.alive():
+            how = service.start('spoke', host_name=configured_host_name() or args.host_name)
+        info = asyncio.run(ask(default_socket(), 'status'))
+        result = {'host': info['host'], 'path': service.executable('agent-hub'), 'started': how}
+        if args.invite:
+            result['code'], result['expires'] = store.invite()
+        if args.json:
+            print(json.dumps(result), flush=True)
+        else:
+            print(f'agent-link daemon for host "{info["host"]}" is {"running" if not how else "started (" + how + ")"}.')
+        return 0
     if args.command == 'daemon':
         config = Config.load(host_name=args.host_name)
         spoke = Spoke(config, store, stderr_log(state_root() / 'spoke' / 'spoke.log'), Box(default_box_root('spoke')))
@@ -258,7 +332,7 @@ async def drop_link(spoke):
 
 
 async def status(spoke):
-    return {'op': 'status', 'host': spoke.host, 'hub_connected': spoke.link is not None,
+    return {'op': 'status', 'host': spoke.host, 'pid': os.getpid(), 'hub_connected': spoke.link is not None,
             'outbox': spoke.store.outbox_stats(), 'agents': spoke.list_agents()}
 
 

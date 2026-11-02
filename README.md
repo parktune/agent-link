@@ -29,27 +29,37 @@ $agent-link trainer 체크포인트 경로 알려줘
   - 메시지 1건이 Markdown 파일 1개이고 계정은 파일 머리말에 있습니다. `/agent-link`로 확인하면 `received/read/`로 옮깁니다.
 - 서버 세션은 기본적으로 **받은 요청에 대한 회신만** 보낼 수 있습니다(`allow_origination`). 회신에 다시 회신하는 것은 거부합니다(에이전트 간 무한 핑퐁 방지).
 
-## 설치
+## 설치와 연결
 
-로컬 PC와 각 서버에서 똑같이 설치합니다.
+**1. 로컬 PC와 각 서버에서 똑같이** 실행합니다.
 
 ```bash
-git clone https://github.com/parktune/agent-link.git ~/agent-link && cd ~/agent-link
-python3 -m venv .venv && .venv/bin/python -m pip install -e .
-.venv/bin/python scripts/install.py        # 스킬 + MCP 서버 등록 (--dry-run 으로 미리보기)
+git clone https://github.com/parktune/agent-link.git ~/work/agent-link && ~/work/agent-link/setup.sh
 ```
 
-| 위치 | 상시 실행 | 등록 |
-|---|---|---|
-| 서버 | `agent-hub daemon --host-name gpu-server-1` | |
-| 로컬 PC | `hubctl serve` | `hubctl add-host <ssh-alias> --remote-path <서버의 agent-hub 절대경로>` |
+`setup.sh`가 하는 일은 다음과 같습니다.
+- Python 3.11 이상으로 `.venv`를 만들고 패키지를 설치합니다. 시스템에 없으면 uv가 있을 때 uv로 받습니다.
+- Claude Code·Codex에 스킬과 MCP 서버를 등록합니다.
+- `~/.local/bin`에 `hubctl`, `agent-hub`를 링크합니다.
 
-`add-host`가 동작하려면 다음이 준비되어 있어야 합니다.
-- 기존 SSH alias로 키 인증이 된다.
-- 서버 host key가 known_hosts에 확인되어 있다.
+업데이트할 때는 `git pull` 후 다시 실행합니다.
 
-등록 과정에서 hub는 SSH로 서버에서 1회용 초대를 받아 바로 소비하고 호스트 토큰을 등록합니다. 끝나면 서버 관리자가 적용할 강제 명령 `authorized_keys` 한 줄을 출력합니다.
-systemd 서비스, 전용 계정, 폐기, 설정은 [운영 가이드](docs/operations.md)에 있습니다.
+**2. 로컬 PC에서** `~/.ssh/config`의 alias로 서버를 연결합니다.
+
+```bash
+hubctl add-host gpu-230
+```
+
+이 한 줄이 SSH로 서버에 들어가 다음을 모두 처리합니다.
+- `agent-hub`를 찾습니다(`~/work/agent-link`, `~/agent-link`, PATH 순).
+- 서버 daemon이 꺼져 있으면 띄웁니다(systemd user 서비스, 안 되면 백그라운드).
+- 1회용 초대로 호스트 토큰을 등록합니다.
+- 로컬 hub가 꺼져 있으면 띄우고 연결까지 확인합니다.
+
+호스트 이름은 alias가 됩니다(`--name`으로 변경). 서버마다 이 명령만 반복하면 됩니다.
+
+준비되어 있어야 하는 것은 하나입니다. `ssh gpu-230`이 비밀번호 없이 되고 서버 host key가 known_hosts에 있어야 합니다. agent-link는 host key를 자동으로 받아들이지 않습니다.
+마지막에 출력되는 `authorized_keys` 한 줄은 전용 계정을 쓸 때의 선택적 보안 강화입니다. 전용 계정, 폐기, 설정은 [운영 가이드](docs/operations.md)에 있습니다.
 
 ## 확인 명령
 
@@ -61,7 +71,7 @@ agent-hub status                                # 서버
 ## 상태
 
 - **구현:** hub, spoke daemon, SSH endpoint, add-host, 레지스트리, 같은 호스트 우선 라우팅, Claude channel 어댑터, Codex 어댑터, 박스 폴백.
-- **자동 테스트:** 25개(모델 호출 없음). 명세 14장 S1–S17 중 S3·S8을 뺀 시나리오를 다룹니다. `scripts/verify_ssh_loopback.py`는 실제 OpenSSH로 add-host와 왕복을 확인합니다.
+- **자동 테스트:** 29개(모델 호출 없음). 명세 14장 S1–S17 중 S3·S8을 뺀 시나리오를 다룹니다. `scripts/verify_ssh_loopback.py`는 실제 OpenSSH로 add-host와 왕복을 확인합니다.
 - **미검증:** 실제 Claude 세션에 channel 주입, 열린 Codex TUI에 `codex queue` 주입, 서로 다른 물리 서버. [수동 시나리오](docs/manual-scenarios.md)의 M0 항목부터 확인합니다.
 - 조사 결과와 명세와 달라진 점은 [M0 보고서](docs/spike-report.md), 결정은 [ADR](docs/adr/), 프레임은 [프로토콜](docs/protocol.md)에 있습니다.
 
