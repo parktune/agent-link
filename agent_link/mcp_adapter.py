@@ -12,7 +12,8 @@ import sys
 
 from .client import SpokeClient
 from .inject import CLAUDE_INSTRUCTIONS, CodexQueue, channel_notification, claude_channel_enabled, codex_envelope
-from .protocol import ProtocolError
+from .protocol import NAME, ProtocolError
+from .sessions import claude_session_name, codex_session_name
 from .state import default_socket
 
 CODEX_INSTRUCTIONS = (
@@ -94,14 +95,30 @@ class Adapter:
         return reply
 
     # ---- tools ------------------------------------------------------------------------------
+    def session_name(self):
+        """The /rename name of this session, if it has one."""
+        if self.tool == 'claude':
+            return claude_session_name(self.session_id)
+        if self.thread and NAME.fullmatch(self.thread) and not codex_session_name(self.thread):
+            return self.thread  # thread_id was given as the /rename name itself
+        return codex_session_name(self.thread)
+
     def whoami(self):
         return {'registered': self.identity is not None, **(self.identity or {}), 'tool': self.tool,
-                'session_id': self.session_id,
+                'session_id': self.session_id, 'session_name': self.session_name(),
                 'daemon_connected': self.client.connected, 'push': self.push_status()}
 
-    async def register(self, name, thread_id=''):
+    async def register(self, name='', thread_id=''):
         if self.tool == 'codex' and thread_id:
             self.thread = thread_id
+        if not name:
+            # Default: the name the user gave this session with /rename.
+            name = self.session_name()
+            if not name:
+                raise ProtocolError('invalid', 'this session has no /rename name; pass a name')
+            if not NAME.fullmatch(name):
+                raise ProtocolError('invalid', f'session name {name!r} cannot be an agent name (use letters, '
+                                    'digits, _ . -); pass a name')
         self.registration = {'name': name}
         if not self.client.connected:
             raise ProtocolError('offline', 'agent-link daemon is not running on this machine; the registration '
@@ -117,7 +134,7 @@ class Adapter:
         if name == 'whoami':
             return self.whoami()
         if name == 'register':
-            return await self.register(args['name'], args.get('thread_id', ''))
+            return await self.register(args.get('name') or '', args.get('thread_id', ''))
         if name == 'list_agents':
             return (await self.client.request('list', filter=args.get('filter', '')))['agents']
         if name == 'recent_messages':
@@ -137,10 +154,10 @@ class Adapter:
 TOOLS = [
     ('whoami', 'Show whether this session is registered in agent-link, its agent ID, mailbox folder and push status.',
      {}, []),
-    ('register', 'Register this session under a name so other agents can message it. '
-     'Ask the user for the name; never invent it. Codex: pass thread_id (CODEX_THREAD_ID or the '
-     '/rename session name) to enable push.',
-     {'name': {'type': 'string'}, 'thread_id': {'type': 'string'}}, ['name']),
+    ('register', 'Register this session so other agents can message it. Without `name` it uses the session '
+     'name set with /rename (shown as session_name by whoami); pass `name` only when the user asks for another. '
+     'Never invent a name. Codex: pass thread_id (CODEX_THREAD_ID or the /rename session name) to enable push.',
+     {'name': {'type': 'string'}, 'thread_id': {'type': 'string'}}, []),
     ('list_agents', 'List agent sessions known to agent-link (ID host:tool:name, status, delivery). '
      'On the local PC this covers every host; on a server only that host.',
      {'filter': {'type': 'string'}}, []),

@@ -18,7 +18,7 @@ $agent-link trainer 체크포인트 경로 알려줘
 /agent-link            ← 받은 메시지(박스) 확인
 ```
 
-- 세션에서 처음 쓰면 이 세션의 **이름**을 묻고 등록합니다. 세션 ID는 `호스트:도구:이름`입니다(예: `gpu-server-1:claude:project-head`, 로컬 PC는 `local:claude:main`).
+- 세션에서 처음 쓰면 그 세션을 등록합니다. 이름은 따로 말하지 않으면 `/rename`으로 붙인 세션 이름을 쓰고, 세션 이름이 없을 때만 묻습니다. 세션 ID는 `호스트:도구:이름`입니다(예: `gpu-server-1:claude:project-head`, 로컬 PC는 `local:claude:main`).
 - 보낸 세션은 기다리지 않고 하던 일을 계속합니다. 회신은 나중에 도착합니다.
 - **받는 쪽:** 세션이 열려 있으면 그 세션에 바로 들어갑니다.
   - Claude: `claude --dangerously-load-development-channels server:agent-link`로 시작한 세션이어야 합니다.

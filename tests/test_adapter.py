@@ -159,3 +159,51 @@ class StdioTests(Environment):
             process.kill()
             await process.wait()
             reading.cancel()
+
+
+class SessionNameTests(Environment):
+    def write(self, path, entries):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(''.join(json.dumps(e) + '\n' for e in entries))
+
+    def test_reads_latest_rename_from_claude_and_codex_records(self):
+        from agent_link.sessions import claude_session_name, codex_session_name
+        sid = '7fb85085-a689-4451-b6c0-9c5a17ad161d'
+        self.write(self.root / 'claude/projects/-home-x' / f'{sid}.jsonl', [
+            {'type': 'user', 'message': 'custom-title in text only'},
+            {'type': 'custom-title', 'customTitle': 'first', 'sessionId': sid},
+            {'type': 'custom-title', 'customTitle': 'vdp-main', 'sessionId': sid}])
+        self.assertEqual(claude_session_name(sid, self.root / 'claude'), 'vdp-main')
+        self.assertIsNone(claude_session_name('../../etc', self.root / 'claude'))
+        self.assertIsNone(claude_session_name('0' * 36, self.root / 'claude'))
+        self.write(self.root / 'codex/session_index.jsonl', [
+            {'id': 'thread-1', 'thread_name': 'old'}, {'id': 'thread-2', 'thread_name': 'other'},
+            {'id': 'thread-1', 'thread_name': 'trainer'}])
+        self.assertEqual(codex_session_name('thread-1', self.root / 'codex'), 'trainer')
+        self.assertIsNone(codex_session_name('thread-3', self.root / 'codex'))
+
+    async def test_register_without_a_name_uses_the_session_name(self):
+        await self.server('gpu1')
+        sid = '11111111-2222-3333-4444-555555555555'
+        os.environ['CLAUDE_CODE_SESSION_ID'] = sid
+        os.environ['CLAUDE_CONFIG_DIR'] = str(self.root / 'claude')
+        adapter = Adapter('claude', self.root / 'gpu1/s.sock', channel=False)
+        task = asyncio.create_task(adapter.run())
+        try:
+            await until(lambda: adapter.client.connected)
+            with self.assertRaisesRegex(ProtocolError, 'no /rename name'):
+                await adapter.call('register', {})
+            self.write(self.root / 'claude/projects/p' / f'{sid}.jsonl',
+                       [{'type': 'custom-title', 'customTitle': '리뷰 세션'}])
+            with self.assertRaisesRegex(ProtocolError, 'cannot be an agent name'):
+                await adapter.call('register', {})
+            self.write(self.root / 'claude/projects/p' / f'{sid}.jsonl',
+                       [{'type': 'custom-title', 'customTitle': 'vdp-main'}])
+            self.assertEqual(adapter.whoami()['session_name'], 'vdp-main')
+            self.assertEqual((await adapter.call('register', {}))['id'], 'gpu1:claude:vdp-main')
+            self.assertEqual((await adapter.call('register', {'name': 'custom'}))['id'], 'gpu1:claude:custom')
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await adapter.client.close()
+            del os.environ['CLAUDE_CODE_SESSION_ID'], os.environ['CLAUDE_CONFIG_DIR']
