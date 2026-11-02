@@ -241,21 +241,19 @@ class ResumeTests(unittest.TestCase):
         _, ran = self.run_cli('--continue')
         self.assertEqual(ran['argv'][-1], '--continue')
 
-    def test_team_login_without_channels_opens_without_the_flag_and_arms_the_watch(self):
-        from agent_link.cli import ARM_WATCH
+    def test_team_login_without_channels_opens_without_the_flag_or_a_prompt(self):
+        from agent_link import claude_hooks
         sid = '11111111-2222-3333-4444-555555555555'
         self.transcript(sid, 'project-head', self.work)
         (self.root / 'claude' / '.claude.json').write_text(json.dumps({'oauthAccount': {'organizationType': 'claude_team'}}))
         result, ran = self.run_cli('--resume', 'project-head')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(ran['argv'], ['--resume', sid, ARM_WATCH])
-        self.assertNotIn('--dangerously-load-development-channels', ran['argv'])
-        self.assertIn('messages go to the mailbox', result.stderr)
-        _, ran = self.run_cli('--continue')
-        self.assertEqual(ran['argv'], ['--continue', ARM_WATCH])
-        result, ran = self.run_cli('--resume')  # the picker cannot take a first prompt
-        self.assertEqual(ran['argv'], ['--resume'])
-        self.assertIn('run /agent-link once', result.stderr)
+        self.assertEqual(ran['argv'], ['--resume', sid])  # no first prompt: the hook does the waking
+        self.assertIn('hook that wakes the session is missing', result.stderr)
+        claude_hooks.install(self.root / 'claude' / 'settings.json')
+        result, ran = self.run_cli('--continue')
+        self.assertEqual(ran['argv'], ['--continue'])
+        self.assertIn('the agent-link hook wakes this session', result.stderr)
         (self.root / 'claude' / 'remote-settings.json').write_text(json.dumps({'channelsEnabled': True}))
         result, ran = self.run_cli('--resume', 'project-head')
         self.assertEqual(ran['argv'][:2], ['--dangerously-load-development-channels', 'server:agent-link'])

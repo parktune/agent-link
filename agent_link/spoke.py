@@ -442,7 +442,10 @@ class Spoke:
         if not isinstance(session_id, str) or not session_id:
             return None
         row = self.store.agent_for_session(session_id)
-        return {k: row[k] for k in ('name', 'tool', 'delivery')} if row else None
+        if not row:
+            return None
+        return {**{k: row[k] for k in ('name', 'tool', 'delivery')},
+                'box': str(self.box.folder(row['id']))}
 
     def register(self, conn, frame):
         tool, name = check_tool(frame.get('tool')), check_name(frame.get('name'))

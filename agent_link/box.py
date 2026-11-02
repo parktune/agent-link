@@ -2,8 +2,9 @@
 
 Used when a message cannot be pushed into an open session: the session is closed, push is not
 available for it, or the push failed. Layout: <root>/<tool>-<name>/received/[read/]<file>.md, plus
-<root>/<tool>-<name>/watch.pid while a session waits for mail with `agent-link wait-box`, and
-<root>/<tool>-<name>/watch.off when the user turned that watch off.
+<root>/<tool>-<name>/watch.pid while a session waits for mail with `agent-link wait-box`,
+<root>/<tool>-<name>/watch.off when the user turned that watch off, and <root>/<tool>-<name>/watch.seen
+with the unread files the Claude hook already woke the session for.
 """
 import os
 from pathlib import Path
@@ -77,6 +78,15 @@ def watch_files(folder):
     return parent / 'watch.pid', parent / 'watch.off'
 
 
+def _seen_file(folder):
+    return Path(folder).parent / 'watch.seen'
+
+
+def _unread(folder):
+    folder = Path(folder)
+    return {p.name for p in folder.glob('*.md')} if folder.is_dir() else set()
+
+
 def waiter_alive(folder):
     """PID of another live `wait-box` watching this received/ folder, or None."""
     lock, _ = watch_files(folder)
@@ -117,11 +127,13 @@ def watch_enabled(folder):
     return not watch_files(folder)[1].exists()
 
 
-def wait_for_mail(folder, interval=2.0, sleep=time.sleep):
+def wait_for_mail(folder, interval=2.0, sleep=time.sleep, new_only=False):
     """Block until the received/ folder holds an unread message and return (count, None).
 
     Return (0, pid) at once when another live waiter already watches this folder, so a session
     that arms the watch twice keeps one. The folder may not exist yet (no mail so far).
+    With `new_only` (the Claude hook), wait for mail the session was not woken for before: unread files
+    it already heard about stay unread until it reads them, and must not wake it again and again.
     Raise Stopped on SIGTERM, which `stop_waiter` sends.
     """
     folder = Path(folder)
@@ -136,11 +148,20 @@ def wait_for_mail(folder, interval=2.0, sleep=time.sleep):
     previous = signal.signal(signal.SIGTERM, stop)
     _private(folder.parent)
     lock.write_text(f'{os.getpid()}\n')
+    seen = set()
+    if new_only:
+        try:
+            seen = set(_seen_file(folder).read_text().split())
+        except OSError:
+            pass
     try:
         while True:
-            count = len(list(folder.glob('*.md'))) if folder.is_dir() else 0
-            if count:
-                return count, None
+            unread = _unread(folder)
+            if unread - seen:
+                if new_only:
+                    _seen_file(folder).write_text(''.join(f'{name}\n' for name in sorted(unread)))
+                return len(unread), None
+            seen &= unread  # read messages leave received/; forget them
             sleep(interval)
     finally:
         signal.signal(signal.SIGTERM, previous)

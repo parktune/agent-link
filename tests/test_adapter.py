@@ -143,9 +143,10 @@ class AdapterTests(Environment):
         await until(lambda: adapter.client.connected)
         return adapter, task
 
-    async def start_watch(self, command, watchers):
+    async def start_watch(self, adapter, watchers):
         watchers.append(await asyncio.create_subprocess_exec(
-            *shlex.split(command), '--interval', '0.05', stdout=asyncio.subprocess.PIPE))
+            sys.executable, '-m', 'agent_link', 'wait-box', '--box', adapter.identity['box'], '--interval', '0.05',
+            stdout=asyncio.subprocess.PIPE))
         return watchers[-1]
 
     async def stop(self, adapter, task, watchers):
@@ -164,10 +165,10 @@ class AdapterTests(Environment):
             self.assertNotIn('watch', adapter.whoami())  # nothing to watch before registering
             watch = (await adapter.register('head'))['watch']
             self.assertEqual((watch['enabled'], watch['running_pid']), (True, None))
-            self.assertIn('wait-box', watch['command'])
-            first = await self.start_watch(watch['command'], watchers)
+            self.assertIn('hook_installed', watch)
+            first = await self.start_watch(adapter, watchers)
             await until(lambda: adapter.whoami()['watch']['running_pid'] == first.pid)
-            second = await self.start_watch(watch['command'], watchers)  # armed twice: the second leaves at once
+            second = await self.start_watch(adapter, watchers)  # armed twice: the second leaves at once
             out, _ = await asyncio.wait_for(second.communicate(), 10)
             self.assertIn('already watched', out.decode())
             self.assertIsNone(first.returncode)
@@ -187,7 +188,7 @@ class AdapterTests(Environment):
         watchers = []
         try:
             watch = (await adapter.call('register', {'name': 'head'}))['watch']
-            running = await self.start_watch(watch['command'], watchers)
+            running = await self.start_watch(adapter, watchers)
             await until(lambda: adapter.whoami()['watch']['running_pid'] == running.pid)
 
             off = await adapter.call('set_watch', {'enabled': False})
@@ -197,7 +198,7 @@ class AdapterTests(Environment):
             self.assertFalse((await adapter.call('register', {'name': 'head'}))['watch']['enabled'])  # remembered
 
             self.assertTrue((await adapter.call('set_watch', {'enabled': True}))['watch']['enabled'])
-            running = await self.start_watch(watch['command'], watchers)
+            running = await self.start_watch(adapter, watchers)
             await until(lambda: adapter.whoami()['watch']['running_pid'] == running.pid)
 
             self.assertIn('gpu1:claude:head', [a['id'] for a in await adapter.call('list_agents', {})])
@@ -211,6 +212,46 @@ class AdapterTests(Environment):
             self.assertNotIn('withdrawn', await adapter.call('register', {'name': 'head'}))
         finally:
             await self.stop(adapter, task, watchers)
+
+    async def test_hook_wakes_a_mailbox_session_once_per_new_message(self):
+        await self.server('gpu1', allow_origination='host')
+        sid = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        with mock.patch.dict(os.environ, {'CLAUDE_CODE_SESSION_ID': sid}):
+            adapter = Adapter('claude', self.root / 'gpu1/s.sock', channel=False)
+        task = asyncio.create_task(adapter.run())
+        socket_path = self.root / 'gpu1/s.sock'
+
+        async def hook(event, session=sid):
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, '-m', 'agent_link', 'wait-box', '--hook', '--socket', str(socket_path), '--interval', '0.05',
+                stdin=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            process.stdin.write(json.dumps({'session_id': session, 'hook_event_name': event}).encode())
+            process.stdin.close()
+            _, err = await asyncio.wait_for(process.communicate(), 15)
+            if process.returncode == 2:
+                self.assertIn('unread message(s)', err.decode())
+            return process.returncode
+        try:
+            await until(lambda: adapter.client.connected)
+            self.assertEqual(await hook('Stop', 'not-registered-session'), 0)
+            starting = asyncio.create_task(hook('SessionStart'))  # before the registration
+            await asyncio.sleep(0.2)
+            await adapter.register('head')
+            await until(lambda: adapter.whoami()['watch']['running_pid'] is not None)
+            sender = await self.session('gpu1', 'claude', 'alpha')
+            await sender.send('claude:head', 'ping')
+            self.assertEqual(await asyncio.wait_for(starting, 15), 2)
+
+            again = asyncio.create_task(hook('Stop'))  # the same unread mail: no second wake
+            await until(lambda: adapter.whoami()['watch']['running_pid'] is not None)
+            self.assertFalse(again.done())
+            await sender.send('claude:head', 'pong')
+            self.assertEqual(await asyncio.wait_for(again, 15), 2)
+
+            adapter.set_watch(False)
+            self.assertEqual(await hook('Stop'), 0)  # watch off: ends at once
+        finally:
+            await self.stop(adapter, task, [])
 
     async def test_watch_only_for_claude_without_push(self):
         identity = {'id': 'gpu1:claude:head', 'box': str(self.root / 'box/claude-head/received')}
@@ -241,6 +282,63 @@ class WaitForMailTests(unittest.TestCase):
             self.assertEqual(wait_for_mail(folder, 0, sleep), (1, None))
             self.assertEqual(len(calls), 3)
             self.assertFalse((folder.parent / 'watch.pid').exists())
+
+    def test_new_only_does_not_wake_twice_for_the_same_unread_mail(self):
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root, 'claude-head', 'received')
+            folder.mkdir(parents=True)
+            (folder / 'a.md').write_text('x')
+            self.assertEqual(wait_for_mail(folder, 0, new_only=True), (1, None))  # unread at start: wake once
+
+            def sleep(_):
+                sleep.calls += 1
+                if sleep.calls == 3:
+                    (folder / 'b.md').write_text('y')
+            sleep.calls = 0
+            self.assertEqual(wait_for_mail(folder, 0, sleep, new_only=True), (2, None))  # a.md alone did not wake it
+            self.assertEqual(sleep.calls, 3)
+
+            (folder / 'a.md').unlink()  # read
+            (folder / 'b.md').unlink()
+
+            def later(_):
+                later.calls += 1
+                if later.calls == 2:
+                    (folder / 'a.md').write_text('a new message under an old name')
+            later.calls = 0
+            self.assertEqual(wait_for_mail(folder, 0, later, new_only=True), (1, None))
+
+
+class ClaudeHookTests(unittest.TestCase):
+    def test_install_keeps_other_hooks_and_replaces_its_own(self):
+        from agent_link import claude_hooks
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root, 'settings.json')
+            other = {'hooks': [{'type': 'command', 'command': 'notify-send done'}]}
+            path.write_text(json.dumps({'model': 'opus', 'hooks': {'Stop': [other]}}))
+            self.assertFalse(claude_hooks.installed(path))
+            claude_hooks.install(path, python='/old/python')
+            claude_hooks.install(path, python='/new/python')  # again: replaced, not added twice
+            settings = json.loads(path.read_text())
+            self.assertEqual(settings['model'], 'opus')
+            self.assertEqual(settings['hooks']['Stop'][0], other)
+            for event in ('SessionStart', 'Stop'):
+                ours = [h for e in settings['hooks'][event] for h in e['hooks'] if 'wait-box --hook' in h['command']]
+                self.assertEqual(len(ours), 1)
+                self.assertEqual((ours[0]['asyncRewake'], ours[0]['command'].split()[0]), (True, '/new/python'))
+                self.assertGreaterEqual(ours[0]['timeout'], 86400)
+            self.assertTrue(claude_hooks.installed(path))
+            claude_hooks.install(path, remove=True)
+            self.assertEqual(json.loads(path.read_text()), {'model': 'opus', 'hooks': {'Stop': [other]}})
+
+    def test_install_refuses_a_broken_settings_file(self):
+        from agent_link import claude_hooks
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root, 'settings.json')
+            path.write_text('{"model": "opus",')
+            with self.assertRaises(ValueError):
+                claude_hooks.install(path)
+            self.assertEqual(path.read_text(), '{"model": "opus",')
 
 
 class StdioTests(Environment):

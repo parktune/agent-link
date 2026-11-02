@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-from .box import REPO_ROOT, Box, Stopped, default_box_root, wait_for_mail
+from .box import REPO_ROOT, Box, Stopped, default_box_root, wait_for_mail, watch_enabled
 from .client import SpokeClient
 from .endpoint import relay
 from .hub import CONNECT_TIMEOUT, Hub, HubStore, SSHTransport, close_process, handshake, hub_identity
@@ -353,12 +353,57 @@ def require_role(wanted, force=False):
                          'local PC; use `agent-link up` here. Pass --force to override.')
 
 
+def claude_hook_watch(socket_path=None, wait_registration=60, interval=2.0):
+    """The Claude Code hook (asyncRewake) behind the mailbox watch.
+
+    Claude Code runs it in the background at SessionStart and after every turn (Stop). For a session that is
+    registered with mailbox delivery and has its watch on, it waits for mail the session was not woken for yet
+    and exits 2 with one line on stderr, which wakes the session. Every other case ends at once with 0.
+    """
+    try:
+        hook = json.loads(sys.stdin.read() or '{}')
+    except ValueError:
+        return 0
+    session_id = hook.get('session_id') if isinstance(hook, dict) else None
+    socket_path = socket_path or default_socket()
+    if not session_id or not service.alive(socket_path):
+        return 0
+    # A session opened with `agent-link claude resume` registers itself a few seconds after it starts.
+    deadline = time.monotonic() + (wait_registration if hook.get('hook_event_name') == 'SessionStart' else 0)
+    while True:
+        try:
+            agent = asyncio.run(ask(socket_path, 'lookup', session_id=session_id)).get('agent')
+        except (SystemExit, ProtocolError):
+            return 0
+        if agent or time.monotonic() >= deadline:
+            break
+        time.sleep(interval)
+    if not agent or agent.get('tool') != 'claude' or agent.get('delivery') != 'box' or not agent.get('box'):
+        return 0
+    box = Path(agent['box'])
+    if not watch_enabled(box):
+        return 0
+    try:
+        count, other = wait_for_mail(box, interval, new_only=True)
+    except Stopped:
+        return 0
+    if other:
+        return 0
+    print(f'agent-link: {count} unread message(s) in this session\'s mailbox. Read them with the agent-link '
+          'check_box tool (the agent-link skill, section 3).', file=sys.stderr, flush=True)
+    return 2
+
+
 def spoke_store():
     return SpokeStore(private_directory(state_root() / 'spoke') / 'spoke.sqlite3')
 
 
 def run_spoke(args):
+    if args.command == 'wait-box' and args.hook:
+        return claude_hook_watch(args.socket, interval=args.interval)
     if args.command == 'wait-box':
+        if not args.box:
+            raise SystemExit('wait-box needs --box (or --hook)')
         try:
             count, other = wait_for_mail(args.box, args.interval)
         except Stopped:
@@ -469,8 +514,11 @@ def build_parser():
     update.add_argument('--local-only', action='store_true', help='Only this machine, not the servers')
     update.add_argument('--dry-run', action='store_true', help='Print the plan only')
     wait = commands.add_parser('wait-box', help='Wait until a mailbox folder has unread mail, print one line, exit')
-    wait.add_argument('--box', type=Path, required=True, help='The received/ folder shown by whoami')
+    wait.add_argument('--box', type=Path, help='The received/ folder shown by whoami')
+    wait.add_argument('--hook', action='store_true', help='Run as the Claude Code hook (SessionStart/Stop, asyncRewake) '
+                      'that wakes a mailbox session on new mail; reads the hook input on stdin')
     wait.add_argument('--interval', type=float, default=2.0, help='Seconds between checks')
+    wait.add_argument('--socket', type=Path, help='With --hook: the hub/daemon socket (default: this machine\'s)')
 
     # Local PC: the hub.
     hub = commands.add_parser('hub', help='Local PC: the hub and the servers it connects to').add_subparsers(
@@ -689,15 +737,6 @@ def run_update(args):
 CHANNEL = ['--dangerously-load-development-channels', 'server:agent-link']
 
 
-# First prompt for a session that cannot get pushes: only the session itself can start the background
-# watch that wakes it when mail arrives.
-ARM_WATCH = ('agent-link: this session receives agent-link messages through its mailbox, because the organization '
-             'keeps Claude Channels off. Call the agent-link whoami tool. If it is not registered and not withdrawn, '
-             'call register() with no arguments. Then, if watch.enabled is true and watch.running_pid is null, run '
-             'watch.command exactly as given with Bash run_in_background: true. Answer in one line that the mailbox '
-             'watch is on, then wait for the user.')
-
-
 def say_err(text):
     print(f'agent-link: {text}', file=sys.stderr, flush=True)
 
@@ -724,8 +763,8 @@ def open_claude(action=None, target=None, extra=()):
     """Run claude registered with agent-link and able to receive messages.
 
     Where the login may use Channels, add the agent-link channel flag (push). Where the organization keeps
-    Channels off, the flag would only be ignored, so open without it and pass a first prompt that arms the
-    mailbox watch. `action` is 'resume' (by name or ID, or the picker without one), 'continue' (this folder's
+    Channels off, the flag would only be ignored, so open without it: messages go to the mailbox and the
+    agent-link hook (claude_hooks, installed by setup.sh) wakes the session when one arrives. `action` is 'resume' (by name or ID, or the picker without one), 'continue' (this folder's
     latest conversation) or None (a new session).
     """
     from .inject import claude_channel_policy
@@ -743,13 +782,14 @@ def open_claude(action=None, target=None, extra=()):
     if not blocked:
         say_err('messages arrive live in this session (push).')
         return launch(['claude', *CHANNEL, *mode, *extra])
-    arm = action is not None and not picker  # a new or picked session has no known name to register yet
+    from . import claude_hooks
     say_err(f'{blocked}.')
-    say_err('messages go to the mailbox; ' + ('the session starts the mailbox watch as its first step and wakes '
-            'when mail arrives.' if arm else 'after the session opens (and has a /rename name), run /agent-link '
-            'once to start the watch that wakes it.'))
-    argv = ['claude', *mode, *extra] + ([ARM_WATCH] if arm else [])
-    return launch(argv, [part if part != ARM_WATCH else '<arm the mailbox watch>' for part in argv])
+    if claude_hooks.installed():
+        say_err('messages go to the mailbox; the agent-link hook wakes this session when one arrives.')
+    else:
+        say_err(f'messages go to the mailbox, but the hook that wakes the session is missing from '
+                f'{claude_hooks.settings_path()}; run ./setup.sh in the agent-link clone. Until then check with /agent-link.')
+    return launch(['claude', *mode, *extra])
 
 
 def open_codex(action=None, target=None, extra=()):

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Install agent-link for Claude Code and Codex on this machine: the /agent-link skill and the MCP server.
+"""Install agent-link for Claude Code and Codex on this machine: the /agent-link skill, the MCP server and,
+for Claude Code, the hook that wakes a mailbox session on new mail.
 
 Run from the clone after `pip install -e .` into the repo's .venv. Changes the user's own config
 only: the skill is copied to ~/.claude/skills and ~/.codex/skills and the MCP server `agent-link` is
-added at user scope. The agent-link plugin and marketplace of 0.5-0.7 (agent-link:register,
+added at user scope; the hook goes into ~/.claude/settings.json next to any others. The agent-link plugin and marketplace of 0.5-0.7 (agent-link:register,
 agent-link:settings) are removed. --replace reinstalls; --dry-run only prints the plan.
 """
 import argparse
@@ -88,6 +89,21 @@ def mcp_plan(tool, replace):
     return steps
 
 
+def install_claude_hook(prefix, dry_run):
+    """The SessionStart/Stop hook that wakes a mailbox session on new mail (agent_link.claude_hooks)."""
+    sys.path.insert(0, str(REPO))
+    from agent_link import claude_hooks
+    path = claude_hooks.settings_path()
+    print(f'{prefix}add the mailbox hook (SessionStart, Stop) -> {path}', flush=True)
+    if dry_run:
+        return
+    try:
+        claude_hooks.install(path, python=sys.executable)
+    except (OSError, ValueError) as error:
+        print(f'note: could not update {path} ({error}); without the hook, mailbox sessions do not wake on mail. '
+              'Fix the file and run ./setup.sh again.', flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--replace', action='store_true', help='Reinstall the plugin and MCP registration')
@@ -117,6 +133,8 @@ def main():
             print(prefix + 'run ' + ' '.join(step), flush=True)
             if not args.dry_run:
                 subprocess.run(step, check=True, timeout=120)
+        if tool == 'claude':
+            install_claude_hook(prefix, args.dry_run)
     if not args.dry_run:
         print('Done. Reopen Claude Code / Codex sessions to load /agent-link ($agent-link in Codex).')
 

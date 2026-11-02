@@ -11,6 +11,7 @@ git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup
 `setup.sh`는 다음을 처리합니다.
 - Python 3.11+로 `.venv`를 만듭니다.
 - Claude Code·Codex에 `/agent-link` 스킬과 MCP 서버를 등록합니다.
+- Claude Code의 `~/.claude/settings.json`에 박스 감시 hook(SessionStart·Stop)을 추가합니다. 기존 hook은 그대로 둡니다.
 - `~/.local/bin`에 `agent-link`를 링크합니다.
 
 ## 서버 연결 (로컬 PC에서)
@@ -72,9 +73,11 @@ $agent-link trainer 체크포인트 경로 알려줘
 | 세션 | 받는 방식 |
 |---|---|
 | Claude, Channels를 쓸 수 있는 계정 | `agent-link claude resume`이 채널 플래그를 붙여 열어 메시지가 세션에 바로 들어감 |
-| Claude, 조직이 Channels를 막은 Team/Enterprise 계정 | 박스에 저장되고, 세션이 띄운 박스 감시가 몇 초 안에 세션을 깨움 |
+| Claude, 조직이 Channels를 막은 Team/Enterprise 계정 | 박스에 저장되고, agent-link hook이 몇 초 안에 세션을 깨움(대화에 프롬프트를 넣지 않음) |
 | Codex | `agent-link codex resume`으로 열면 `codex queue`로 그 대화에 넣음. 안 되면 박스에 쌓이고 `$agent-link`로 확인 |
 | 닫혀 있는 세션 | 박스에 저장, 다음에 열었을 때 확인 |
+
+Channels가 막힌 Claude 세션은 hook이 깨웁니다. Claude Code가 세션 시작과 매 턴 끝에 `agent-link wait-box --hook`을 백그라운드로 띄우고, 새 메일이 오면 그 hook이 끝나면서 세션이 깨어납니다. agent-link에 박스로 등록된 세션이 아니면 hook은 바로 끝납니다. 같은 메일로 두 번 깨우지 않습니다.
 
 박스는 로컬 PC `<repo>/hub/<tool>-<name>/received/`, 서버 `<repo>/spoke/<tool>-<name>/received/`에 메시지 1건당 Markdown 파일 1개로 쌓입니다.
 

@@ -11,6 +11,7 @@ import os
 import shlex
 import sys
 
+from . import claude_hooks
 from .box import set_watch_enabled, stop_waiter, waiter_alive, watch_enabled
 from .client import SpokeClient
 from .inject import (CLAUDE_INSTRUCTIONS, CodexQueue, channel_notification, claude_channel_enabled, claude_channel_policy,
@@ -125,15 +126,15 @@ class Adapter:
         return codex_session_name(self.thread)
 
     def watch(self):
-        """Without push, a Claude session can still wake on mail by running `command` in the background.
+        """Without push, the agent-link hook (claude_hooks) wakes a Claude session when mail arrives.
 
-        `enabled` is the user's choice (set_watch); `running_pid` is the live waiter, if any.
+        `enabled` is the user's choice (set_watch); `running_pid` is the live waiter, if any; `hook_installed`
+        whether the hook is in Claude Code's settings.json.
         """
         if self.tool != 'claude' or not self.identity or self.push_status()['available']:
             return None
         box = self.identity['box']
-        return {'enabled': watch_enabled(box), 'running_pid': waiter_alive(box),
-                'command': shlex.join([sys.executable, '-m', 'agent_link', 'wait-box', '--box', box])}
+        return {'enabled': watch_enabled(box), 'running_pid': waiter_alive(box), 'hook_installed': claude_hooks.installed()}
 
     def restart(self, name=None):
         """How to reopen this Claude session with push: exit it, then run `command`.
@@ -239,14 +240,14 @@ class Adapter:
 
 TOOLS = [
     ('whoami', 'Show whether this session is registered in agent-link, its agent ID, mailbox folder and push status. '
-     'A Claude session without push also gets `watch` {enabled, running_pid, command}: when enabled and not running, '
-     'run `command` in the background so this session wakes when mail arrives. It also gets `restart` {command, '
+     'A Claude session without push also gets `watch` {enabled, running_pid, hook_installed}: the agent-link hook '
+     'wakes it when mail arrives; nothing to start by hand. It also gets `restart` {command, '
      'by_id}: after the user exits this session, `command` (agent-link claude resume) reopens it with push by its name.',
      {}, []),
     ('unregister', 'Withdraw this session\'s registration (only when the user asks): other agents can no longer message '
      'it and its mailbox watch stops. The mailbox folder is kept.', {}, []),
     ('set_watch', 'Turn the mailbox watch of a Claude session without push on or off (when the user asks). Off is '
-     'remembered for this agent name and stops the running watch; on only allows it, so then run watch.command.',
+     'remembered for this agent name and stops the running watch; on lets the hook watch again from the next turn.',
      {'enabled': {'type': 'boolean'}}, ['enabled']),
     ('register', 'Register this session so other agents can message it. Without `name` it uses the session '
      'name set with /rename (shown as session_name by whoami); pass `name` only when the user asks for another. '
