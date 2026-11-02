@@ -241,7 +241,13 @@ class Spoke:
         self.accept_links = accept_links
         # Registered agents survive restarts as offline entries so their mailbox keeps receiving.
         fields = ('id', 'tool', 'name', 'cwd', 'session_id', 'delivery', 'started_at', 'last_seen')
-        self.agents = {row['id']: Agent(host=self.host, **{k: row[k] for k in fields}) for row in store.known_agents()}
+        self.agents = {}
+        for row in store.known_agents():
+            if row['id'].split(':', 1)[0] != self.host:
+                # Registered while the daemon ran under another host name; the session re-registers.
+                store.forget_agent(row['id'])
+                continue
+            self.agents[row['id']] = Agent(host=self.host, **{k: row[k] for k in fields})
         self.link = None
         self.extra_ops = {}
         self.list_agents = lambda filter_text='': [a.public() for a in self.agents.values() if matches(a.public(), filter_text)]

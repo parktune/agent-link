@@ -67,6 +67,10 @@ class UpTests(unittest.TestCase):
                 status = json.loads(subprocess.run([sys.executable, '-m', 'agent_link', 'status', '--json'], env=env,
                                                    capture_output=True, text=True, timeout=30, check=True).stdout)
                 self.assertEqual((status['role'], status['host'], status['hub_connected']), ('spoke', 'gpu-server-1', False))
+                refused = subprocess.run([sys.executable, '-m', 'agent_link', 'hub', 'up'], env=env,
+                                         capture_output=True, text=True, timeout=30)
+                self.assertEqual(refused.returncode, 1)
+                self.assertIn('is an agent-link server', refused.stderr)
             finally:
                 status = subprocess.run([sys.executable, '-m', 'agent_link', 'status', '--json'], env=env,
                                         capture_output=True, text=True, timeout=30)
@@ -135,3 +139,48 @@ class ChannelPolicyTests(unittest.TestCase):
             self.write(managed, {'channelsEnabled': True})
             self.assertIsNone(claude_channel_policy(home, managed=(managed,)))
             self.assertIsNotNone(claude_channel_policy(home, managed=()))
+
+
+class RoleGuardTests(unittest.TestCase):
+    def run_cli(self, state, *argv):
+        env = {**os.environ, 'AGENT_HUB_STATE': state, 'AGENT_HUB_BOX': state + '/box'}
+        return subprocess.run([sys.executable, '-m', 'agent_link', *argv], env=env, capture_output=True, text=True,
+                              timeout=30)
+
+    def test_server_commands_refuse_on_the_hub_pc(self):
+        from agent_link.hub import HubStore
+        with tempfile.TemporaryDirectory(prefix='al-') as state:
+            store = HubStore(Path(state, 'hub', 'hub.sqlite3'))
+            store.add_host('gpu-server-1', 'gpu-server-1', '/srv/agent-link', 't' * 43)
+            store.db.close()
+            for argv in (('up',), ('up', '--restart'), ('daemon',)):
+                result = self.run_cli(state, *argv)
+                self.assertEqual(result.returncode, 1, argv)
+                self.assertIn('is the agent-link hub', result.stderr)
+
+    def test_hub_commands_refuse_on_a_paired_server(self):
+        from agent_link.spoke import SpokeStore
+        with tempfile.TemporaryDirectory(prefix='al-') as state:
+            store = SpokeStore(Path(state, 'spoke', 'spoke.sqlite3'))
+            code, _ = store.invite()
+            store.enroll(code, 't' * 43)
+            store.db.close()
+            for argv in (('hub', 'up'), ('hub', 'serve'), ('hub', 'add-host', 'gpu-server-2')):
+                result = self.run_cli(state, *argv)
+                self.assertEqual(result.returncode, 1, argv)
+                self.assertIn('is an agent-link server', result.stderr)
+
+
+class StaleAgentTests(unittest.TestCase):
+    def test_agents_registered_under_another_host_name_are_dropped(self):
+        from agent_link.box import Box
+        from agent_link.spoke import Agent, Spoke, SpokeStore
+        from agent_link.state import Config, Log
+        with tempfile.TemporaryDirectory() as root:
+            store = SpokeStore(Path(root, 'spoke.sqlite3'))
+            store.save_agent(Agent('old-hostname:claude:project-head', 'old-hostname', 'claude', 'project-head'))
+            store.save_agent(Agent('gpu-server-1:claude:head', 'gpu-server-1', 'claude', 'head'))
+            spoke = Spoke(Config(host_name='gpu-server-1'), store, Log(), Box(Path(root, 'box')))
+            self.assertEqual(list(spoke.agents), ['gpu-server-1:claude:head'])
+            self.assertEqual([a['id'] for a in store.known_agents()], ['gpu-server-1:claude:head'])
+            store.db.close()

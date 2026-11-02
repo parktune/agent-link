@@ -43,6 +43,7 @@ agent-link hub add-host gpu-server-1
 - 그래도 이름이 어긋나면(예: `config.toml`의 `host_name`을 나중에 바꿈) 연결이 `host_mismatch`로 거부되고, `agent-link hub hosts`의 `last_error_detail`과 서버 로그에 고치는 방법이 나온다. 서버에서 `agent-link up --restart`로 페어링한 이름으로 다시 띄우거나, 이름을 바꾸려면 `agent-link hub remove-host` 후 다시 `add-host`한다.
 - `agent-link`가 다른 곳에 있으면 `--remote-path`로 지정한다.
 - systemd user 서비스는 로그아웃 후에도 유지하려면 linger가 필요하다(`loginctl enable-linger $USER`, 관리자 정책 확인). 백그라운드 프로세스는 재부팅하면 사라지지만, 다음 `agent-link hub add-host`나 `agent-link up`이 다시 띄운다.
+- 한 머신은 hub와 서버 daemon 중 하나만 맡는다(소켓이 하나다). hub가 있는 PC에서 `agent-link up`/`daemon`을, 서버로 등록된 머신에서 `agent-link hub up`/`serve`/`add-host`/`discover`를 실행하면 거부하고 맞는 명령을 안내한다. 정말 필요하면 `--force`를 붙인다.
 - 수동으로 띄우려면 서버에서 `agent-link up`(또는 포그라운드 `agent-link daemon`), 로컬에서 `agent-link hub up`(또는 `agent-link hub serve`)을 쓴다.
 
 권장 구성은 서버에 전용 OS 계정을 두고, 그 계정의 `authorized_keys`에 hub 전용 키를 강제 명령으로 등록하는 것이다.

@@ -242,6 +242,8 @@ def discover_hosts(args, store):
 
 
 def run_hub(args):
+    if args.command in ('up', 'serve', 'add-host', 'discover'):
+        require_role('hub', getattr(args, 'force', False))
     root = private_directory(state_root() / 'hub')
     if args.command == 'up':
         if args.restart and service.alive():
@@ -310,6 +312,53 @@ def stop_running(wait=15):
         time.sleep(0.1)
 
 
+def running_role():
+    """'hub' or 'spoke' for what answers on this machine's socket, else None."""
+    if not service.alive():
+        return None
+    try:
+        info = asyncio.run(ask(default_socket(), 'status'))
+    except ProtocolError:
+        return 'hub'  # hubs before 0.5.6 do not answer status
+    return info.get('role') or ('spoke' if 'hub_connected' in info else 'hub')
+
+
+def _count(path, query):
+    if not path.exists():
+        return 0
+    import sqlite3
+    db = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+    try:
+        return db.execute(query).fetchone()[0]
+    except sqlite3.Error:
+        return 0
+    finally:
+        db.close()
+
+
+def machine_role():
+    """What this machine is set up as: running, else from its state (paired servers, or a hub token)."""
+    role = running_role()
+    if role:
+        return role
+    if _count(state_root() / 'hub' / 'hub.sqlite3', 'SELECT COUNT(*) FROM hosts'):
+        return 'hub'
+    if _count(state_root() / 'spoke' / 'spoke.sqlite3', 'SELECT COUNT(*) FROM tokens'):
+        return 'spoke'
+    return None
+
+
+def require_role(wanted, force=False):
+    """Keep `agent-link up` off the hub's PC and `agent-link hub ...` off a server: one socket, one role."""
+    role = None if force else machine_role()
+    if role == 'hub' and wanted == 'spoke':
+        raise SystemExit('This machine is the agent-link hub (the local PC). `agent-link up` and `daemon` are for '
+                         'servers; use `agent-link hub up` here. Pass --force to override.')
+    if role == 'spoke' and wanted == 'hub':
+        raise SystemExit('This machine is an agent-link server (its daemon is paired with a hub). The hub runs on the '
+                         'local PC; use `agent-link up` here. Pass --force to override.')
+
+
 def spoke_store():
     return SpokeStore(private_directory(state_root() / 'spoke') / 'spoke.sqlite3')
 
@@ -328,6 +377,8 @@ def run_spoke(args):
         return 0
     if args.command == 'endpoint':
         return asyncio.run(relay(args.socket or default_socket()))
+    if args.command in ('up', 'daemon'):
+        require_role('spoke', args.force)
     store = spoke_store()
     if args.command == 'up':
         how = None
@@ -403,10 +454,12 @@ def build_parser():
     up.add_argument('--restart', action='store_true', help='Restart a running daemon (e.g. to take the paired name)')
     up.add_argument('--invite', action='store_true', help='Also issue a one-use invitation (for agent-link hub add-host)')
     up.add_argument('--json', action='store_true')
+    up.add_argument('--force', action='store_true', help='Start even though this machine is set up as the hub')
     daemon = commands.add_parser('daemon', help='Server: run the daemon in the foreground (what `up` starts)')
     daemon.add_argument('--socket', type=Path)
     daemon.add_argument('--host-name', help='Host name in agent IDs when config.toml has none and the server is '
                         'not paired yet (default: short hostname)')
+    daemon.add_argument('--force', action='store_true', help='Run even though this machine is set up as the hub')
     commands.add_parser('endpoint', help='Server: SSH forced command the hub runs').add_argument('--socket', type=Path)
     invite = commands.add_parser('invite', help='Server: issue a one-use invitation code (5 minutes)')
     invite.add_argument('--json', action='store_true', help='Machine output for agent-link hub add-host')
@@ -420,7 +473,10 @@ def build_parser():
         dest='hub_command', required=True)
     hub_up = hub.add_parser('up', help='Start the hub in the background (systemd user service if possible)')
     hub_up.add_argument('--restart', action='store_true', help='Restart a running hub (e.g. after an update)')
-    hub.add_parser('serve', help='Run the hub in the foreground (what `hub up` starts)').add_argument('--socket', type=Path)
+    hub_up.add_argument('--force', action='store_true', help='Start even though this machine is set up as a server')
+    serve = hub.add_parser('serve', help='Run the hub in the foreground (what `hub up` starts)')
+    serve.add_argument('--socket', type=Path)
+    serve.add_argument('--force', action='store_true', help='Run even though this machine is set up as a server')
     add = hub.add_parser('add-host', help='Connect a server by its SSH alias (from ~/.ssh/config)')
     add.add_argument('alias')
     add.add_argument('--name', help='Host name in agent IDs (default: the alias)')
