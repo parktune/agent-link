@@ -23,16 +23,15 @@ class SameHostTests(Environment):
         self.assertEqual(c.received, [])  # S2: only the addressed session
         self.assertEqual(b.received[0]['to'], 'gpu1:claude:beta')
 
-    async def test_s12_explicit_own_host_missing_and_ambiguous_names_are_not_sent_up(self):
+    async def test_s12_explicit_own_host_missing_is_not_sent_up_and_names_are_unique(self):
         await self.server('gpu1', allow_origination='all')
         a = await self.session('gpu1', 'claude', 'alpha')
         await self.session('gpu1', 'claude', 'head')
-        await self.session('gpu1', 'codex', 'head')
+        with self.assertRaisesRegex(Exception, 'name_taken'):  # Claude or Codex, one session per name
+            await self.session('gpu1', 'codex', 'head')
         with self.assertRaisesRegex(Exception, 'not_found'):
             await a.send('gpu1:claude:ghost', 'x')
-        with self.assertRaisesRegex(Exception, 'ambiguous'):
-            await a.send('head', 'x')
-        self.assertEqual((await a.send('codex:head', 'x'))['route'], 'local')
+        self.assertEqual((await a.send('head', 'x'))['route'], 'local')
         self.assertEqual(self.spokes['gpu1'].store.outbox_stats()['items'], 0)  # nothing went to the hub
 
     async def test_origination_none_only_allows_replies(self):
@@ -386,3 +385,71 @@ class PairedNameTests(Environment):
             link.check_hello({'op': 'hello_ok', 'host': 'old-hostname'})
         with self.assertRaisesRegex(ProtocolError, 'unauthorized'):
             link.check_hello({'op': 'error'})
+
+
+class RemoveTests(Environment):
+    async def ask(self, where, op, **fields):
+        from agent_link.client import SpokeClient
+        client = SpokeClient(self.root / ('hub.sock' if where == 'local' else f'{where}/s.sock'))
+        await client.connect()
+        try:
+            return await client.request(op, **fields)
+        finally:
+            await client.close()
+
+    async def setup_hosts(self):
+        await self.server('gpu1')
+        await self.server('gpu2')
+        self.enroll('gpu1')
+        self.enroll('gpu2')
+        await self.start_hub()
+
+    async def test_names_are_unique_across_hosts_but_a_session_keeps_its_own(self):
+        await self.setup_hosts()
+        await self.session('local', 'claude', 'main')
+        head = await self.session('gpu1', 'claude', 'head')
+        await self.connected('gpu1')
+        await self.connected('gpu2')
+        await until(lambda: any(a['id'] == 'gpu1:claude:head' for a in self.spokes['gpu2'].directory))
+        with self.assertRaisesRegex(Exception, 'name_taken.*gpu1:claude:head'):
+            await self.session('gpu2', 'codex', 'head')
+        with self.assertRaisesRegex(Exception, 'name_taken'):
+            await self.session('local', 'codex', 'head')  # the hub knows every host
+        again = await head.client.request('register', tool='claude', name='head', session_id='session-head')
+        self.assertEqual(again['id'], 'gpu1:claude:head')
+
+    async def test_remove_by_name_from_any_machine(self):
+        await self.setup_hosts()
+        main = await self.session('local', 'claude', 'main')
+        head = await self.session('gpu1', 'claude', 'head')
+        withdrawn = []
+        head.client.on_withdrawn = withdrawn.append
+        await self.connected('gpu1')
+        await self.connected('gpu2')
+        # From the PC: a session on a server.
+        reply = await self.ask('local', 'remove', target='head')
+        self.assertEqual((reply['removed'], reply['was']), ('gpu1:claude:head', 'open'))
+        await until(lambda: 'gpu1:claude:head' not in self.spokes['gpu1'].agents)
+        await until(lambda: withdrawn == ['removed'])
+        with self.assertRaisesRegex(Exception, 'not_found'):
+            await main.send('head', 'x')
+        # From a server: a session on the PC goes up through the hub.
+        await until(lambda: any(a['id'] == 'local:claude:main' for a in self.spokes['gpu2'].directory))
+        reply = await self.ask('gpu2', 'remove', target='main')
+        self.assertEqual(reply['removed'], 'local:claude:main')
+        self.assertNotIn('local:claude:main', self.hub.local.agents)
+        with self.assertRaisesRegex(Exception, 'not_found'):
+            await self.ask('local', 'remove', target='nobody')
+
+    async def test_sessions_closed_for_14_days_expire(self):
+        spoke = await self.server('gpu1')
+        old = await self.session('gpu1', 'claude', 'old')
+        await self.session('gpu1', 'claude', 'fresh')
+        await old.stop()
+        self.sessions.remove(old)
+        await until(lambda: spoke.agents['gpu1:claude:old'].conn is None)
+        spoke.agents['gpu1:claude:old'].last_seen -= 15 * 86400
+        spoke.expire()
+        self.assertEqual(set(spoke.agents), {'gpu1:claude:fresh'})
+        self.assertEqual([a['id'] for a in spoke.store.known_agents()], ['gpu1:claude:fresh'])
+        self.assertEqual(spoke.config.offline_expiry_days, 14)

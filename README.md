@@ -54,6 +54,7 @@ agent-link status --json   # 재연결 횟수·마지막 오류까지 전부
 | 메시지 보내기 | Claude `/agent-link <세션> <내용>`, Codex `$agent-link <세션> <내용>` |
 | 받은 메시지(박스) 확인 | `/agent-link` (내용 없이) |
 | 이 세션 설정 | `/agent-link` 뒤에 말로: 이름 바꾸기, 등록 철회, 박스 감시 켜기·끄기 |
+| 등록 지우기 | 터미널에서 `agent-link remove <세션 이름>` (어느 머신에서 실행해도 그 세션을 찾아 지움) |
 
 ```
 agent-link claude resume project-head
@@ -63,7 +64,7 @@ $agent-link trainer 체크포인트 경로 알려줘
 /agent-link                 ← 받은 메시지(박스) 확인
 ```
 
-- 세션은 `agent-link claude|codex resume`으로 열 때(모델 호출 없이 MCP가 바로 등록) 또는 처음 `/agent-link`를 쓸 때 세션 이름(`/rename`)으로 등록됩니다. 이름 대신 세션 ID도 되고, `resume`만 쓰면 고르기 화면, `continue`(Codex는 `last`)는 지금 폴더의 가장 최근 대화입니다. `--resume`·`--continue`·`--last`처럼 써도 되고, 해당 CLI에 넘길 인자는 `--` 뒤에 씁니다. 세션 이름이 없을 때만 이름을 묻습니다. 등록을 철회한 세션은 다시 자동 등록하지 않습니다. 세션 ID는 `호스트:도구:이름`입니다(예: `gpu-server-1:claude:project-head`, 로컬 PC는 `local:claude:main`).
+- 세션은 `agent-link claude|codex resume`으로 열 때(모델 호출 없이 MCP가 바로 등록) 또는 처음 `/agent-link`를 쓸 때 세션 이름(`/rename`)으로 등록됩니다. 이름 대신 세션 ID도 되고, `resume`만 쓰면 고르기 화면, `continue`(Codex는 `last`)는 지금 폴더의 가장 최근 대화입니다. `--resume`·`--continue`·`--last`처럼 써도 되고, 해당 CLI에 넘길 인자는 `--` 뒤에 씁니다. 세션 이름이 없을 때만 이름을 묻습니다. 세션 이름은 전체(모든 머신, Claude·Codex 공통)에서 하나뿐이어야 합니다. 다른 세션이 쓰는 이름이면 등록이 거부되고, 닫혀 있는 옛 세션이 이름을 쥐고 있다면 `agent-link remove <이름>`으로 지웁니다. 14일 동안 열리지 않은 세션의 등록은 자동으로 지워집니다(다시 열면 다시 등록). 등록을 철회한 세션은 다시 자동 등록하지 않습니다. 세션 ID는 `호스트:도구:이름`입니다(예: `gpu-server-1:claude:project-head`, 로컬 PC는 `local:claude:main`).
 - 보낸 세션은 기다리지 않고 하던 일을 계속합니다. 회신은 나중에 도착합니다.
 - **받는 쪽:** 세션이 열려 있으면 그 세션에 바로 들어갑니다.
   - Claude: `agent-link claude resume <세션 이름>`으로 엽니다. `/rename`한 이름(또는 세션 ID)으로 세션을 찾아 그 폴더에서 다시 열면서 계정에 맞는 수신 방식을 고릅니다. Channels를 쓸 수 있는 계정이면 채널 플래그를 붙여 push로 받고, 조직이 Channels를 막은 Team/Enterprise 계정이면 플래그 없이 열고 첫 입력으로 박스 감시를 켜서 메일이 오면 세션이 깨어나게 합니다. claude에 넘길 인자는 `--` 뒤에 씁니다(`agent-link claude resume project-head -- --model opus`). 새 세션은 `claude --dangerously-load-development-channels server:agent-link`로 엽니다.

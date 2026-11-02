@@ -30,7 +30,7 @@ CODEX_INSTRUCTIONS = (
 class Adapter:
     def __init__(self, tool, socket_path, codex=None, channel=None):
         self.tool = tool
-        self.client = SpokeClient(socket_path, self.inject)
+        self.client = SpokeClient(socket_path, self.inject, self.withdrawn_by_daemon)
         self.session_id = os.environ.get('CLAUDE_CODE_SESSION_ID' if tool == 'claude' else 'CODEX_THREAD_ID', '')
         # Set by `agent-link claude|codex ...`: register when this MCP server starts ('1' = the session's name),
         # and for Codex the thread to queue messages into.
@@ -182,6 +182,11 @@ class Adapter:
                                 'is kept and sent when it starts')
         await self._register()
         return self.whoami()
+
+    def withdrawn_by_daemon(self, reason):
+        """`agent-link remove` (or expiry) dropped this session's registration: do not register it again here."""
+        self.registration = self.identity = None
+        self.withdrawn = True
 
     async def unregister(self):
         """Withdraw this session: other agents can no longer reach it, and its watch stops."""

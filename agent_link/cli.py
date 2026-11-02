@@ -462,6 +462,8 @@ def build_parser():
     daemon.add_argument('--force', action='store_true', help='Run even though this machine is set up as the hub')
     commands.add_parser('endpoint', help='Server: SSH forced command the hub runs').add_argument('--socket', type=Path)
     commands.add_parser('revoke', help='Server: delete the hub peer token and drop the hub connection')
+    remove = commands.add_parser('remove', help='Remove a session\'s registration, on whatever host it lives')
+    remove.add_argument('session', help='Its name (unique across hosts), or the full host:tool:name ID')
     update = commands.add_parser('update', help='git pull + setup.sh + restart here; on the hub PC also every server')
     update.add_argument('--hosts', help='On the hub PC: only these servers (comma-separated names or aliases)')
     update.add_argument('--local-only', action='store_true', help='Only this machine, not the servers')
@@ -779,6 +781,15 @@ def agent_link(argv=None):
         return show_status(args.socket or default_socket(), args.json)
     if args.command == 'update':
         return run_update(args)
+    if args.command == 'remove':
+        if not service.alive():
+            raise SystemExit('agent-link is not running on this machine (agent-link hub up / agent-link up)')
+        try:
+            reply = asyncio.run(ask(default_socket(), 'remove', target=args.session))
+        except ProtocolError as error:
+            raise SystemExit(f'{error.code}: {error.detail}') from None
+        print(f'removed {reply["removed"]} ({reply.get("was", "")})')
+        return 0
     if args.command == 'hub':
         args.command = args.hub_command
         return run_hub(args)

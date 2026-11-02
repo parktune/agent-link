@@ -326,6 +326,8 @@ class Hub:
                            uplink=HubUplink(self), accept_links=False)
         self.local.list_agents = self.list_agents
         self.local.on_presence = self.publish_directory
+        self.local.remove = self.remove  # the PC's `agent-link remove` reaches every host
+        self.local.others = lambda: [a for host in self.presence.values() for a in host]
         self.local.extra_ops = {'hosts': self._hosts_op, 'recent': self._recent_op, 'reload': self._reload_op,
                                 'status': self._status_op}
         self.transport_factory = transport_factory
@@ -464,10 +466,38 @@ class Hub:
         self.log('routed', id=message['id'], origin=origin, to=message['to'], size=meta['size'])
         return result
 
+    async def remove(self, target):
+        """Remove a session by name (unique across hosts) or full ID, wherever it is registered."""
+        host, tool, name = parse_target(target)
+        found = [a for a in self.all_agents() if a['name'] == name and (tool is None or a['tool'] == tool)
+                 and (host is None or a['host'] == host)]
+        if len(found) != 1:
+            raise ProtocolError('ambiguous' if found else 'not_found', f'{len(found)} sessions match {target}')
+        agent = found[0]
+        if agent['host'] == LOCAL_HOST:
+            return self.local.remove_agent(agent['id'])
+        link = self.links.get(agent['host'])
+        if link is None or not link.connected:
+            raise ProtocolError('offline', f'{agent["host"]} is not connected; try again when it is')
+        if 'forget' not in link.caps:
+            raise ProtocolError('unsupported_version', f'{agent["host"]} runs an older agent-link; run agent-link update')
+        await link.send({'op': 'forget', 'id': agent['id']})
+        self.presence[agent['host']] = [a for a in self.presence.get(agent['host'], []) if a['id'] != agent['id']]
+        self.publish_directory()
+        self.log('agent_removed', agent=agent['id'], via='hub')
+        return {'removed': agent['id'], 'was': 'open' if agent.get('status') == 'online' else 'closed'}
+
     async def handle_outbox(self, host, frame):
         seq = int(frame.get('seq', 0))
         if seq <= self.store.last_seq(host):
             return {'op': 'ack', 'seq': seq}  # already processed before a reconnect or hub restart
+        if 'remove' in frame:  # `agent-link remove` on a server for a session on another host
+            try:
+                result = await self.remove(str((frame['remove'] or {}).get('target') or ''))
+            except ProtocolError as error:
+                result = {'error': error.code, 'detail': error.detail}
+            self.store.set_last_seq(host, seq)
+            return {'op': 'ack', 'seq': seq, 'result': result}
         result = None
         message = frame.get('msg')
         try:

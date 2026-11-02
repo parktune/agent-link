@@ -51,6 +51,7 @@ class Config:
     allow_origination: str = 'all'
     max_content_bytes: int = 65536
     max_hops: int = 3
+    offline_expiry_days: float = 14
     outbox_max_items: int = 1000
     outbox_max_bytes: int = 16 << 20
     deliver_timeout: float = 60.0

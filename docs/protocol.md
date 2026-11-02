@@ -24,11 +24,12 @@
 | hub → host | `ack {seq, result?}` | outbox를 `seq`까지 처리했다는 뜻이다. `result`는 그 메시지의 라우팅 결과(`{id, status}` 또는 `{id, error}`)이며, 기다리고 있는 보낸 세션에 전달한다 |
 | hub → host | `ping` | 응답 `pong` (명세 추가 사항) |
 | hub → host | `directory {agents[]}` | 다른 호스트의 에이전트 목록(id, host, tool, name, status, delivery). 바뀔 때 보낸다. `hello_ok`의 `caps`에 `directory`가 있는 서버에만 보낸다 (명세 추가 사항, 0.6.5) |
-| host → hub | `outbox {seq, msg}` | 세션이 hub로 올린 메시지(회신 등) |
+| hub → host | `forget {id}` | 그 호스트의 세션 등록을 지운다(`agent-link remove`). `caps`에 `forget`이 있는 서버에만 보낸다 (0.7.3) |
+| host → hub | `outbox {seq, msg}` / `outbox {seq, remove}` | 세션이 hub로 올린 메시지(회신 등), 또는 다른 호스트 세션의 삭제 요청 `{target}` |
 | host → hub | `presence {agents[]}` | 변화가 있을 때와 30초마다 |
 
 endpoint는 첫 프레임에 SSH 접속 주소(`SSH_CONNECTION`의 클라이언트 IP:포트)를 `peer`로 붙인다. hub가 보낸 `peer`는 지운다.
-endpoint는 첫 프레임으로 `hello`/`enroll`만, 그다음에는 `deliver`/`ack`/`ping`/`directory`만 통과시킨다. 그 밖의 프레임에는 `error unauthorized`를 보내고 연결을 닫는다.
+endpoint는 첫 프레임으로 `hello`/`enroll`만, 그다음에는 `deliver`/`ack`/`ping`/`directory`/`forget`만 통과시킨다. 그 밖의 프레임에는 `error unauthorized`를 보내고 연결을 닫는다.
 토큰 검증은 daemon이 한다.
 
 ### 커서
@@ -56,4 +57,4 @@ daemon → 어댑터: `deliver {msg, rid}`. 어댑터는 세션에 넣은 뒤 `d
 
 ## 오류 코드
 
-`not_found`, `offline`, `ambiguous`, `too_large`, `hops_exceeded`, `unauthorized`, `reply_to_reply`, `origination_denied`, `outbox_full`, `invalid`, `timeout`, `inject_failed`, `unsupported_version`.
+`not_found`, `offline`, `ambiguous`, `name_taken`, `too_large`, `hops_exceeded`, `unauthorized`, `reply_to_reply`, `origination_denied`, `outbox_full`, `invalid`, `timeout`, `inject_failed`, `unsupported_version`.

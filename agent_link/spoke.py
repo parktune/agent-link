@@ -338,6 +338,8 @@ class Spoke:
         op = frame['op']
         if op == 'register':
             return {'op': 'registered', **self.register(conn, frame)}
+        if op == 'remove':  # agent-link remove: only processes that can open this socket get here
+            return {'op': 'removed', **await self.remove(str(frame.get('target') or ''))}
         if op == 'lookup':
             return {'op': 'lookup', 'agent': self.lookup(frame.get('session_id'))}
         if op == 'list':
@@ -364,6 +366,77 @@ class Spoke:
             return {'op': 'ok'}
         raise ProtocolError('unauthorized', f'unknown operation {op}')
 
+    def check_name_free(self, name, identifier, session_id, conn):
+        """One session per name, Claude or Codex alike, on this host and on the others the hub reported.
+
+        The same session coming back (same ID, or this connection) keeps its name.
+        """
+        for agent in self.agents.values():
+            if agent.name != name or agent.conn is conn and conn is not None:
+                continue
+            same_session = agent.id == identifier and (not session_id or not agent.session_id
+                                                        or agent.session_id == session_id)
+            if same_session and not (agent.conn and agent.conn is not conn):
+                continue
+            state = 'open' if agent.conn else 'closed'
+            raise ProtocolError('name_taken', f'"{name}" is already used by {agent.id} ({state}). Rename this session '
+                                f'(/rename), or free the name with `agent-link remove {name}`.')
+        for agent in self.others():
+            if agent.get('name') == name:
+                raise ProtocolError('name_taken', f'"{name}" is already used by {agent["id"]}. Rename this session '
+                                    f'(/rename), or free the name with `agent-link remove {agent["id"]}` on the hub PC.')
+
+    def others(self):
+        """Agents on other hosts (servers learn them from the hub's directory)."""
+        return self.directory
+
+    def remove_agent(self, identifier, reason='removed'):
+        """Forget a registration; tell its session if it is open, and stop its mailbox watch."""
+        from .box import stop_waiter
+        agent = self.agents.pop(identifier, None)
+        if agent is None:
+            raise ProtocolError('not_found', f'no session {identifier} on {self.host}')
+        self.store.forget_agent(identifier)
+        stop_waiter(self.box.folder(identifier))
+        if agent.conn:
+            agent.conn.agent = None
+            self.spawn(self._notify_withdrawn(agent.conn, reason))
+        self.log('agent_removed', agent=identifier, reason=reason)
+        self.presence_changed()
+        return {'removed': identifier, 'was': 'open' if agent.conn else 'closed'}
+
+    async def _notify_withdrawn(self, conn, reason):
+        try:
+            await conn.send({'op': 'withdrawn', 'reason': reason})
+        except (ConnectionError, RuntimeError):
+            pass
+
+    def resolve(self, target):
+        """A registered agent ID on this host for `name`, `tool:name` or a full ID."""
+        host, tool, name = parse_target(target)
+        if host not in (None, self.host):
+            raise ProtocolError('not_found', f'{target} is not on this host ({self.host})')
+        found = self.match(tool, name)
+        if len(found) != 1:
+            raise ProtocolError('ambiguous' if found else 'not_found',
+                                f'{len(found)} sessions match {target} on {self.host}')
+        return found[0].id
+
+    async def remove(self, target):
+        """Remove a session by name wherever it is: here, or through the hub on another host."""
+        try:
+            return self.remove_agent(self.resolve(target))
+        except ProtocolError as error:
+            if error.code != 'not_found' or not isinstance(self.uplink, OutboxUplink):
+                raise
+        return await self.uplink.remove(target)
+
+    def expire(self, now=None):
+        """Forget sessions closed for longer than offline_expiry_days (they register again when reopened)."""
+        limit = (now or time.time()) - self.config.offline_expiry_days * 86400
+        for agent in [a for a in self.agents.values() if a.conn is None and a.last_seen < limit]:
+            self.remove_agent(agent.id, reason='expired')
+
     def lookup(self, session_id):
         """A restarted MCP process of the same session gets its earlier registration back."""
         if not isinstance(session_id, str) or not session_id:
@@ -377,12 +450,10 @@ class Spoke:
         delivery = frame.get('delivery') or 'push'
         if delivery not in ('push', 'box'):
             raise ProtocolError('invalid', 'delivery must be push or box')
-        existing = self.agents.get(identifier)
-        if existing and existing.conn and existing.conn is not conn:
-            raise ProtocolError('invalid', f'{identifier} is already online in another session; choose another name')
+        text = {k: str(frame.get(k) or '')[:256] for k in ('cwd', 'session_id')}
+        self.check_name_free(name, identifier, text['session_id'], conn)
         if conn.agent and conn.agent.id != identifier and conn.agent.conn is conn:
             conn.agent.conn = None  # renaming this session
-        text = {k: str(frame.get(k) or '')[:256] for k in ('cwd', 'session_id')}
         agent = Agent(identifier, self.host, tool, name, delivery=delivery, conn=conn, **text)
         self.agents[identifier] = agent
         self.store.save_agent(agent)
@@ -473,8 +544,10 @@ class Spoke:
             self.on_presence()
 
     async def _presence_loop(self):
+        self.expire()
         while True:
             await asyncio.sleep(PRESENCE_INTERVAL)
+            self.expire()
             self.presence_changed()
 
 
@@ -494,23 +567,33 @@ class OutboxUplink:
         config = self.spoke.config
         return self.spoke.store.outbox_put(kind, body, config.outbox_max_items, config.outbox_max_bytes)
 
-    async def route(self, message):
-        seq = self._put('msg', message)
+    async def _submit(self, kind, body):
+        """Queue an outbox entry, push it if the hub is connected and wait briefly for its result (None: queued)."""
+        seq = self._put(kind, body)
         link = self.spoke.link
         if link is None:
-            return {'id': message['id'], 'status': 'queued'}
+            return None
         future = asyncio.get_running_loop().create_future()
         self.waiters[seq] = future
         try:
-            await link.send({'op': 'outbox', 'seq': seq, 'msg': message})
+            await link.send({'op': 'outbox', 'seq': seq, kind: body})
             result = await asyncio.wait_for(future, self.wait)
         except (TimeoutError, ConnectionError):
-            return {'id': message['id'], 'status': 'queued'}
+            return None
         finally:
             self.waiters.pop(seq, None)
         if 'error' in result:
             raise ProtocolError(result['error'], result.get('detail', ''))
-        return {'id': message['id'], 'status': result.get('status', 'delivered')}
+        return result
+
+    async def route(self, message):
+        result = await self._submit('msg', message)
+        return {'id': message['id'], 'status': result.get('status', 'delivered') if result else 'queued'}
+
+    async def remove(self, target):
+        """Ask the hub to remove a session that lives on another host."""
+        result = await self._submit('remove', {'target': target})
+        return result or {'removed': target, 'was': 'queued until the hub is reachable'}
 
     def acked(self, seq, result):
         future = self.waiters.get(seq)
@@ -587,7 +670,7 @@ class LinkSession:
                 spoke.link.close()  # one hub connection per host; the newest wins
             spoke.link = self
             await self.send({'op': 'hello_ok', 'v': PROTOCOL_VERSION, 'host': spoke.host,
-                             'caps': ['stream', 'directory']})
+                             'caps': ['stream', 'directory', 'forget']})
             spoke.log('hub_connected', host=spoke.host, hub=self.info, outbox=spoke.store.outbox_stats())
             for frame in spoke.store.outbox_after(0):
                 await self.send(frame)
@@ -623,6 +706,11 @@ class LinkSession:
             spoke.spawn(self._deliver(frame.get('msg')))
         elif op == 'directory':
             spoke.directory = directory_entries(frame.get('agents'), exclude_host=spoke.host)
+        elif op == 'forget':  # agent-link remove on the hub PC
+            try:
+                spoke.remove_agent(spoke.resolve(str(frame.get('id', ''))))
+            except ProtocolError:
+                pass
 
 
     async def _result(self, message):

@@ -7,9 +7,10 @@ from .protocol import FRAME_LIMIT, ProtocolError, read_frame, write_frame
 
 
 class SpokeClient:
-    def __init__(self, socket_path, on_deliver=None):
+    def __init__(self, socket_path, on_deliver=None, on_withdrawn=None):
         self.socket_path = os.fspath(socket_path)
         self.on_deliver = on_deliver
+        self.on_withdrawn = on_withdrawn
         self.pending = {}
         self.writer = None
         self.lock = asyncio.Lock()
@@ -60,6 +61,8 @@ class SpokeClient:
                 rid = frame.get('rid', '')
                 if frame['op'] == 'deliver':
                     asyncio.create_task(self._deliver(frame))
+                elif frame['op'] == 'withdrawn' and self.on_withdrawn:
+                    self.on_withdrawn(frame.get('reason'))
                 elif rid in self.pending and not self.pending[rid].done():
                     self.pending[rid].set_result(frame)
         except (ProtocolError, ConnectionError):
