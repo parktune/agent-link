@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Install agent-link for Claude Code and Codex on this machine: the /agent-link skill, the
-agent-link plugin (agent-link:settings) and the MCP server.
+agent-link plugin (agent-link:register, agent-link:settings) and the MCP server.
 
 Run from the clone after `pip install -e .` into the repo's .venv. Changes the user's own config
 only: the standalone skill is copied to ~/.claude/skills and ~/.codex/skills, this repo becomes a
@@ -104,8 +104,8 @@ def main():
             if not args.dry_run:
                 subprocess.run(step, check=True, timeout=120)
     if not args.dry_run:
-        print('Done. Restart open Claude Code / Codex sessions; then use /agent-link:settings and /agent-link '
-              '(Codex: $agent-link:settings, $agent-link).')
+        print('Done. Restart open Claude Code / Codex sessions; then use /agent-link:register and /agent-link '
+              '(Codex: $agent-link:register, $agent-link).')
 
 
 if __name__ == '__main__':

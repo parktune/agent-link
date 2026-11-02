@@ -1,6 +1,6 @@
 ---
 name: settings
-description: Show or change this Claude Code or Codex session's agent-link settings - register it (or rename the registration), withdraw the registration, and turn the mailbox watch on or off (Claude sessions without push). Use when the user invokes agent-link:settings (/agent-link:settings, $agent-link:settings) or asks to register, unregister, rename or check this session in agent-link, or to start or stop watching its mailbox.
+description: Show or change this Claude Code or Codex session's agent-link settings - register it again under another name, withdraw the registration, and turn the mailbox watch on or off (Claude sessions without push). Use when the user invokes agent-link:settings (/agent-link:settings, $agent-link:settings) or asks to unregister, rename or check this session in agent-link, or to start or stop watching its mailbox. First-time registration with the restart command is agent-link:register.
 ---
 
 # agent-link: settings
@@ -42,7 +42,7 @@ If the session is already registered under that name, skip to "Then" below.
 
 Then arm the watch if it applies (section 6) and tell the user the ID and mailbox folder in one or two lines. If `push.available` is false, explain once:
 
-- Claude: messages are saved to the mailbox; while the watch is on, it wakes this session when one arrives, a few seconds late and only while this session is open. To receive them live instead, start Claude Code with `claude --dangerously-load-development-channels server:agent-link`.
+- Claude: messages are saved to the mailbox; while the watch is on, it wakes this session when one arrives, a few seconds late and only while this session is open. To receive them live instead, the user leaves this session and runs `restart.command` from the result (shown exactly, in a code block; it resumes this session by name with the channel flag, `restart.by_id` by session ID). `agent-link:register` walks through this.
 - Codex: the thread is unknown, so messages are saved to the mailbox.
 
 ## 4. Withdraw

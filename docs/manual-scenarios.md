@@ -7,11 +7,12 @@
 
 | ID | 확인 | 방법 | 기대 |
 |---|---|---|---|
-| M0-1 | Claude channel 주입 | 로컬에서 `hubctl serve`를 실행한다. 터미널 A에서 `claude --dangerously-load-development-channels server:agent-link`를 열고 `/agent-link:settings register main`, 터미널 B에서 일반 `claude`를 열고 `/agent-link:settings register other` 후 `/agent-link main 안녕` | A 화면에 `← agent-link: 안녕`이 나타나고 A가 응답한다. `whoami`의 `push.available=true` |
+| M0-1 | Claude channel 주입 | 로컬에서 `hubctl serve`를 실행한다. 터미널 A에서 `claude --dangerously-load-development-channels server:agent-link`를 열고 `/agent-link:register main`, 터미널 B에서 일반 `claude`를 열고 `/agent-link:register other` 후 `/agent-link main 안녕` | A 화면에 `← agent-link: 안녕`이 나타나고 A가 응답한다. `whoami`의 `push.available=true` |
 | M0-2 | 플래그 없는 Claude | M0-1의 B 세션(플래그 없음)으로 보낸다 | `stored`, `<repo>/hub/claude-other/received/`에 파일이 생긴다. 등록할 때 건 감시가 끝나며 B가 깨어나 메시지를 읽고 감시를 다시 건다 |
+| M0-2b | 플래그 붙여 다시 열기 | `/rename other`한 B에서 `/agent-link:register`가 알려 준 명령을 B를 나간 뒤 실행한다 | 같은 대화가 다시 열리고, 원래 플래그가 유지된다. `/agent-link:settings`에서 같은 ID, `push.available=true` |
 | M0-2a | 감시 끄기·켜기·철회 | B에서 `/agent-link:settings watch off` 후 다시 B로 보내고, `watch on` 후 한 번 더 보낸다. 끝으로 `/agent-link:settings unregister` | off 동안은 박스에만 쌓이고 B가 깨지 않는다. on 하면 감시가 다시 걸리고 쌓인 메시지부터 읽는다. 철회 후 B로 보내면 `not_found`이고 `/agent-link`가 B를 다시 등록하지 않는다 |
 | M0-3 | `CLAUDE_CODE_SESSION_ID` | M0-1 세션에서 `/mcp`로 agent-link를 다시 연결한다 | 다시 묻지 않고 같은 이름으로 복구된다(주입될 때만) |
-| M0-4 | Codex `codex queue` 주입 | Codex를 열고 `$agent-link:settings register`로 등록한다. 스킬이 `printenv CODEX_THREAD_ID`를 시도한다. 다른 세션에서 그 Codex로 보낸다 | Codex TUI에 `[agent-link] request ...` 메시지가 들어가 처리된다. 안 되면 `stored` + 박스 파일 |
+| M0-4 | Codex `codex queue` 주입 | Codex를 열고 `$agent-link:register`로 등록한다. 스킬이 `printenv CODEX_THREAD_ID`를 시도한다. 다른 세션에서 그 Codex로 보낸다 | Codex TUI에 `[agent-link] request ...` 메시지가 들어가 처리된다. 안 되면 `stored` + 박스 파일 |
 | M0-5 | Codex 스레드 미상 | `CODEX_THREAD_ID`가 비어 있으면 `/rename trainer` 후 이름으로 등록한다 | M0-4와 같다 |
 | M0-6 | 조직 정책 | Team/Enterprise 계정이면 M0-1에서 `blocked by org policy`가 나오는지 본다 | 나오면 관리자가 `channelsEnabled`를 켜야 한다. 그동안은 박스로 동작한다 |
 

@@ -9,7 +9,8 @@ from unittest import mock
 from pathlib import Path
 
 from agent_link.box import wait_for_mail
-from agent_link.inject import CodexQueue, channel_notification, claude_channel_enabled, codex_envelope
+from agent_link.inject import (CodexQueue, channel_notification, claude_channel_enabled, claude_launch_args,
+                               claude_restart_argv, codex_envelope)
 from agent_link.mcp_adapter import Adapter
 from agent_link.protocol import ProtocolError, encode, make_message, parse_target, uuid7, validate_message
 from tests.support import Environment, until
@@ -43,6 +44,22 @@ class InjectTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(claude_channel_enabled(cmdlines=[['claude', '--channels=plugin:a@b,server:agent-link']]))
         self.assertFalse(claude_channel_enabled(cmdlines=[['claude', flag, 'server:other']]))
         self.assertFalse(claude_channel_enabled(cmdlines=[['claude', 'server:agent-link']]))
+
+    def test_restart_command_keeps_the_users_flags_and_adds_the_channel(self):
+        flag = '--dangerously-load-development-channels'
+        self.assertEqual(claude_launch_args([['python', 'mcp'], ['claude', '--resume', 'vdp-main']]), ['--resume', 'vdp-main'])
+        self.assertEqual(claude_launch_args([['node', '/usr/lib/claude/cli.js', '-c']]), ['-c'])
+        self.assertEqual(claude_launch_args([['bash']]), [])
+        self.assertEqual(claude_restart_argv('vdp-main', ['--resume', 'vdp-main']),
+                         ['claude', flag, 'server:agent-link', '--resume', 'vdp-main'])
+        self.assertEqual(claude_restart_argv('x', ['--dangerously-skip-permissions', '-c', '--model', 'opus', '-n', 'old',
+                                                   '--channels', 'plugin:a@b', '-r']),
+                         ['claude', flag, 'server:agent-link', '--dangerously-skip-permissions', '--model', 'opus',
+                          '--channels', 'plugin:a@b', '--resume', 'x'])
+        self.assertEqual(claude_restart_argv('x', [f'{flag}=server:other', '--name=old', '--resume=abc']),
+                         ['claude', flag, 'server:other', 'server:agent-link', '--resume', 'x'])
+        self.assertEqual(claude_restart_argv('x', [flag, 'plugin:z@y', 'server:agent-link', '--verbose']),
+                         ['claude', flag, 'plugin:z@y', 'server:agent-link', '--verbose', '--resume', 'x'])
 
     def test_push_payloads(self):
         message = make_message('gpu1:claude:head', 'local:claude:main', '보고', 'reply', uuid7(), 1)
@@ -314,6 +331,13 @@ class SessionNameTests(Environment):
             self.assertEqual(adapter.whoami()['session_name'], 'vdp-main')
             self.assertEqual((await adapter.call('register', {}))['id'], 'gpu1:claude:vdp-main')
             self.assertEqual((await adapter.call('register', {'name': 'custom'}))['id'], 'gpu1:claude:custom')
+            restart = adapter.whoami()['restart']
+            self.assertEqual(restart['resume'], 'vdp-main')  # the session name, not the agent name
+            self.assertRegex(restart['command'], r'^cd \S+ && claude --dangerously-load-development-channels '
+                                                 r'server:agent-link .*--resume vdp-main$')
+            self.assertTrue(restart['by_id'].endswith(f'--resume {sid}'))
+            adapter.channel = True
+            self.assertNotIn('restart', adapter.whoami())  # already live
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)

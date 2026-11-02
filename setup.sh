@@ -37,7 +37,7 @@ fi
 echo "[2/4] installed agent-link $(.venv/bin/python -c 'import agent_link; print(agent_link.__version__)')"
 
 .venv/bin/python scripts/install.py --replace | sed 's/^/      /'
-echo "[3/4] installed /agent-link, the agent-link:settings plugin and the MCP server"
+echo "[3/4] installed /agent-link, the agent-link:register/settings plugin and the MCP server"
 
 mkdir -p "$HOME/.local/bin"
 for command in hubctl agent-hub; do
@@ -55,6 +55,6 @@ Next:
   server   : nothing else. The hub starts this server's daemon when it connects.
   local PC : hubctl discover   (pick servers from ~/.ssh/config)  or  hubctl add-host <ssh-alias>
 Then open Claude with  claude --dangerously-load-development-channels server:agent-link
-and use /agent-link:settings to register the session, /agent-link to message others
-(Codex: $agent-link:settings, $agent-link).
+and use /agent-link:register to register the session, /agent-link to message others
+(Codex: $agent-link:register, $agent-link).
 EOF
