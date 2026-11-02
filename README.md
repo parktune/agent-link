@@ -2,10 +2,10 @@
 
 ## 설치와 연결
 
-**1. 로컬 PC와 각 서버에서 똑같이** 실행합니다.
+**1. 로컬 PC와 각 서버에서 똑같이**, 설치하고 싶은 폴더에서 실행합니다. 경로는 어디든 됩니다.
 
 ```bash
-git clone https://github.com/parktune/agent-link.git ~/work/agent-link && ~/work/agent-link/setup.sh
+git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup.sh
 ```
 
 `setup.sh`가 하는 일은 다음과 같습니다.
@@ -13,7 +13,7 @@ git clone https://github.com/parktune/agent-link.git ~/work/agent-link && ~/work
 - Claude Code·Codex에 스킬과 MCP 서버를 등록합니다.
 - `~/.local/bin`에 `hubctl`, `agent-hub`를 링크합니다.
 
-업데이트할 때는 `git pull` 후 다시 실행합니다.
+업데이트할 때는 clone한 폴더에서 `git pull && ./setup.sh`를 실행합니다.
 
 **2. 로컬 PC에서** 서버를 연결합니다. 고르는 방식과 직접 지정하는 방식이 있습니다.
 
@@ -25,7 +25,7 @@ hubctl add-host gpu-server-1   # 또는 alias를 직접 지정
 `discover`는 이미 등록된 서버를 `[=] (등록됨)`으로 표시합니다. 확정하면 고른 서버마다 아래 `add-host` 과정을 차례로 실행하고 결과를 요약합니다. 터미널이 아닌 곳에서는 `--hosts gpu-server-1,gpu-server-2`으로 지정합니다.
 
 이 한 줄이 SSH로 서버에 들어가 다음을 모두 처리합니다.
-- `agent-hub`를 찾습니다(`~/work/agent-link`, `~/agent-link`, PATH 순).
+- `agent-hub`를 찾습니다. 서버의 `setup.sh`가 만든 `~/.local/bin/agent-hub` 링크나 PATH로 찾으므로 clone 위치는 상관없습니다.
 - 서버 daemon이 꺼져 있으면 띄웁니다(systemd user 서비스, 안 되면 백그라운드).
 - 1회용 초대로 호스트 토큰을 등록합니다.
 - 로컬 hub가 꺼져 있으면 띄우고 연결까지 확인합니다.

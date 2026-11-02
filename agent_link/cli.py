@@ -91,9 +91,9 @@ def explain_ssh_failure(stderr):
     return 'SSH failed: ' + stderr.strip()[-300:]
 
 
-# Where `agent-hub` usually lives on a server. The first executable match wins.
-SEARCH = ('"$(command -v agent-hub 2>/dev/null)"', '"$HOME/work/agent-link/.venv/bin/agent-hub"',
-          '"$HOME/agent-link/.venv/bin/agent-hub"', '"$HOME/.local/bin/agent-hub"')
+# setup.sh links agent-hub into ~/.local/bin wherever the clone lives; a non-interactive SSH shell
+# may not have that on PATH, so check it explicitly. The first executable match wins.
+SEARCH = ('"$(command -v agent-hub 2>/dev/null)"', '"$HOME/.local/bin/agent-hub"')
 
 
 def remote_up_command(remote_path, host_name):
@@ -114,10 +114,11 @@ def remote_up(alias, remote_path, host_name, ssh_config=None):
     argv[-1] = remote_up_command(remote_path, host_name)
     result = subprocess.run(argv, capture_output=True, text=True, timeout=60)
     if 'agent-hub-not-found' in result.stderr:
-        raise SystemExit(f'agent-link is not installed on {alias}. On the server run:\n'
-                         '  git clone https://github.com/parktune/agent-link.git ~/work/agent-link && '
-                         '~/work/agent-link/setup.sh\n'
-                         'or pass --remote-path if it lives elsewhere.')
+        raise SystemExit(f'agent-link is not installed on {alias} (no agent-hub on PATH or in ~/.local/bin). '
+                         'On the server, in any folder, run:\n'
+                         '  git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup.sh\n'
+                         'or, if it is already cloned, run ./setup.sh in that clone (it links agent-hub), '
+                         'or pass --remote-path.')
     if result.returncode:
         raise SystemExit(f'{alias}: ' + explain_ssh_failure(result.stderr))
     try:

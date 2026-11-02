@@ -5,7 +5,7 @@
 ## 1. 설치 (로컬 PC와 각 서버 공통)
 
 ```bash
-git clone https://github.com/parktune/agent-link.git ~/work/agent-link && ~/work/agent-link/setup.sh
+git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup.sh
 ```
 
 `setup.sh`는 아래 순서로 처리한다. 이 저장소와 사용자 설정만 바꾼다. 업데이트할 때는 `git pull` 후 다시 실행한다.
@@ -34,7 +34,7 @@ hubctl add-host gpu-server-1
 | 단계 | 내용 |
 |---|---|
 | 1/4 | DNS와 TCP를 점검한다. ProxyJump·ProxyCommand를 쓰면 건너뛰고 SSH 단계에서 판단한다 |
-| 2/4 | SSH 한 번으로 서버의 `agent-hub`를 찾는다(PATH, `~/work/agent-link`, `~/agent-link`, `~/.local/bin` 순). `agent-hub up`으로 daemon이 꺼져 있으면 띄우고(systemd user 서비스 `agent-link-spoke`, 실패하면 백그라운드 프로세스), 1회용 초대를 받는다. 코드는 SSH 파이프로 hub 메모리에만 들어온다 |
+| 2/4 | SSH 한 번으로 서버의 `agent-hub`를 찾는다(PATH, 그다음 `setup.sh`가 만든 `~/.local/bin/agent-hub` 링크. clone 위치는 상관없다). `agent-hub up`으로 daemon이 꺼져 있으면 띄우고(systemd user 서비스 `agent-link-spoke`, 실패하면 백그라운드 프로세스), 1회용 초대를 받는다. 코드는 SSH 파이프로 hub 메모리에만 들어온다 |
 | 3/4 | 256-bit 토큰을 만들어 `enroll`하고 `hello`로 확인한다. 서버에는 해시만 저장된다 |
 | 4/4 | 로컬 hub가 꺼져 있으면 띄우고(`agent-link-hub` 서비스, 실패하면 백그라운드) 새 호스트에 연결됐는지 확인한다 |
 
