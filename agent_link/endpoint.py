@@ -41,6 +41,12 @@ async def relay(socket_path, stdin=None, stdout=None):
             if not allowed:
                 emit(encode(ProtocolError('unauthorized', f'frame {frame["op"]} not allowed').frame()))
                 return
+            if first:
+                # Only the endpoint knows where the SSH connection came from; never trust a hub-sent value.
+                frame.pop('peer', None)
+                client = os.environ.get('SSH_CONNECTION', '').split()
+                if len(client) >= 2:
+                    frame['peer'] = f'{client[0]}:{client[1]}'
             first = False
             sock_writer.write(encode(frame))
             await sock_writer.drain()

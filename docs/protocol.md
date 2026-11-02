@@ -18,8 +18,8 @@
 
 | 방향 | 프레임 | 설명 |
 |---|---|---|
-| hub → host | `hello {v, token}` | 응답 `hello_ok {v, host, caps}`. 같은 호스트에 새 연결이 오면 이전 연결을 닫는다 |
-| hub → host | `enroll {code, token}` | 응답 `enroll_ok {host}`. 첫 프레임으로만 허용한다 |
+| hub → host | `hello {v, token, hub?}` | 응답 `hello_ok {v, host, caps}`. 같은 호스트에 새 연결이 오면 이전 연결을 닫는다. `hub`는 `{name, user}`로 hub가 스스로 밝히는 이름이며 표시용이다 |
+| hub → host | `enroll {code, token, hub?}` | 응답 `enroll_ok {host}`. 첫 프레임으로만 허용한다. 서버는 토큰 해시 옆에 `hub` 이름을 저장한다 |
 | hub → host | `deliver {msg}` | 응답 `delivered {id, status}` 또는 `error {id, code}`. status: `delivered`, `stored`, `stored_offline` |
 | hub → host | `ack {seq, result?}` | outbox를 `seq`까지 처리했다는 뜻이다. `result`는 그 메시지의 라우팅 결과(`{id, status}` 또는 `{id, error}`)이며, 기다리고 있는 보낸 세션에 전달한다 |
 | hub → host | `exchange {after, deliver[]}` | poll 모드. 응답 `exchange_ok {results, outbox, presence}` |
@@ -27,6 +27,7 @@
 | host → hub | `outbox {seq, msg}` / `outbox {seq, meta}` | 세션이 hub로 올린 메시지, 또는 같은 호스트 안에서 전달한 메시지의 메타데이터(본문 없음) |
 | host → hub | `presence {agents[]}` | 변화가 있을 때와 30초마다 |
 
+endpoint는 첫 프레임에 SSH 접속 주소(`SSH_CONNECTION`의 클라이언트 IP:포트)를 `peer`로 붙인다. hub가 보낸 `peer`는 지운다.
 endpoint는 첫 프레임으로 `hello`/`enroll`만, 그다음에는 `deliver`/`ack`/`exchange`/`ping`만 통과시킨다. 그 밖의 프레임에는 `error unauthorized`를 보내고 연결을 닫는다.
 토큰 검증은 daemon이 한다.
 

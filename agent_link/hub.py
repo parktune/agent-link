@@ -1,9 +1,11 @@
 """Local hub: global registry, routing between hosts and one connection loop per host (4, 8)."""
 import asyncio
+import getpass
 import os
 from dataclasses import replace
 from pathlib import Path
 import random
+import socket
 import time
 
 from .protocol import (FRAME_LIMIT, LOCAL_HOST, PROTOCOL_VERSION, ProtocolError, encode, parse_target, read_frame,
@@ -18,6 +20,15 @@ PING_INTERVAL = 15
 IDLE_LIMIT = 45
 BACKOFF_MAX = 60
 POLL_ACTIVE, POLL_IDLE = 1, 10
+
+
+def hub_identity():
+    """What this hub tells servers about itself, shown in `agent-hub status`."""
+    try:
+        user = getpass.getuser()
+    except (KeyError, OSError):
+        user = ''
+    return {'name': socket.gethostname(), 'user': user}
 
 
 class HubStore:
@@ -206,7 +217,7 @@ class HostLink:
         reader, writer, process = await asyncio.wait_for(self.transport.open(), CONNECT_TIMEOUT)
         stderr_task = asyncio.create_task(drain(process))
         try:
-            hello = await handshake(reader, writer, {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': self.token})
+            hello = await handshake(reader, writer, {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': self.token, 'hub': hub_identity()})
             if hello['op'] != 'hello_ok' or hello.get('host') != self.name:
                 raise ProtocolError('unauthorized', f'unexpected hello from {self.name}')
             self.writer, self.connected = writer, True
@@ -305,7 +316,7 @@ class PollLink(HostLink):
         batch, self.queue = self.queue[:16], self.queue[16:]
         reader, writer, process = await asyncio.wait_for(self.transport.open(), CONNECT_TIMEOUT)
         try:
-            hello = await handshake(reader, writer, {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': self.token})
+            hello = await handshake(reader, writer, {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': self.token, 'hub': hub_identity()})
             if hello.get('host') != self.name:
                 raise ProtocolError('unauthorized', f'unexpected hello from {self.name}')
             after = self.hub.store.last_seq(self.name)

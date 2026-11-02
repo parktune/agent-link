@@ -10,11 +10,12 @@ import shlex
 import socket
 import subprocess
 import sys
+import time
 
 from .box import Box, Stopped, default_box_root, wait_for_mail
 from .client import SpokeClient
 from .endpoint import relay
-from .hub import CONNECT_TIMEOUT, Hub, HubStore, SSHTransport, close_process, handshake
+from .hub import CONNECT_TIMEOUT, Hub, HubStore, SSHTransport, close_process, handshake, hub_identity
 from .protocol import NAME, PROTOCOL_VERSION, ProtocolError, check_name
 from . import service
 from .spoke import Spoke, SpokeStore
@@ -170,12 +171,12 @@ async def add_host(args, store):
     say(f'[2/4] server daemon {started.get(remote["started"], remote["started"])} at {remote_path}')
     token = secrets.token_urlsafe(32)
     transport = SSHTransport(args.alias, remote_path, args.remote_socket, args.ssh_config)
-    enrolled = await one_shot(transport, {'op': 'enroll', 'code': remote['code'], 'token': token})
+    enrolled = await one_shot(transport, {'op': 'enroll', 'code': remote['code'], 'token': token, 'hub': hub_identity()})
     name = check_name(enrolled.get('host', ''), 'host')
     if store.host(name):
         raise SystemExit(f'host name {name} is already registered; remove-host first')
     store.add_host(name, args.alias, remote_path, token, args.remote_socket, args.mode, args.ssh_config)
-    hello = await one_shot(transport, {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token})
+    hello = await one_shot(transport, {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token, 'hub': hub_identity()})
     if hello.get('op') != 'hello_ok':
         raise SystemExit('Token check after enrollment failed')
     say(f'[3/4] enrolled as host "{name}" (token verified)')
@@ -394,8 +395,16 @@ async def drop_link(spoke):
 
 
 async def status(spoke):
+    hub = spoke.link.info if spoke.link else None
     return {'op': 'status', 'host': spoke.host, 'pid': os.getpid(), 'hub_connected': spoke.link is not None,
+            'hub': readable(hub) if hub else None, 'enrolled_hubs': [readable(h) for h in spoke.store.enrolled_hubs()],
             'outbox': spoke.store.outbox_stats(), 'agents': spoke.list_agents()}
+
+
+def readable(info):
+    """Timestamps as local time for people reading `agent-hub status`."""
+    return {k: time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(v)) if k in ('enrolled_at', 'connected_since') else v
+            for k, v in info.items()}
 
 
 def hubctl_main():

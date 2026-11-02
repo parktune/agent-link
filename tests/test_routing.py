@@ -264,3 +264,50 @@ class EndpointSecurityTests(Environment):
         with self.assertRaisesRegex(Exception, 'closed'):
             spoke.store.enroll(code, 'x' * 43)
         self.assertFalse(spoke.store.check_token('x' * 43))
+
+
+class HubIdentityTests(Environment):
+    async def endpoint_session(self, frames, ssh_connection):
+        import os, sys
+        env = {**os.environ, 'SSH_CONNECTION': ssh_connection}
+        process = await asyncio.create_subprocess_exec(
+            sys.executable, '-m', 'agent_link', 'agent-hub', 'endpoint', '--socket', str(self.root / 'gpu1' / 's.sock'),
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, env=env)
+        for frame in frames:
+            process.stdin.write(encode(frame))
+        await process.stdin.drain()
+        reply = await asyncio.wait_for(read_frame(process.stdout), 10)
+        return process, reply
+
+    async def test_status_shows_which_hub_is_connected_and_from_where(self):
+        spoke = await self.server('gpu1')
+        code, _ = spoke.store.invite()
+        token = 'T' * 43
+        process, reply = await self.endpoint_session(
+            [{'op': 'enroll', 'code': code, 'token': token, 'hub': {'name': 'my-pc', 'user': 'taeyoon', 'x': 'drop'},
+              'peer': 'forged'}], '10.0.0.7 51234 10.0.0.1 22')
+        self.assertEqual(reply['op'], 'enroll_ok')
+        await process.wait()
+        self.assertEqual(spoke.store.enrolled_hubs()[0]['name'], 'my-pc')
+        self.assertNotIn('x', spoke.store.enrolled_hubs()[0])
+        process, reply = await self.endpoint_session(
+            [{'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token, 'hub': {'name': 'my-pc', 'user': 'taeyoon'},
+              'peer': '6.6.6.6:1'}], '10.0.0.7 51300 10.0.0.1 22')
+        self.assertEqual(reply['op'], 'hello_ok')
+        await until(lambda: spoke.link is not None)
+        info = spoke.link.info
+        self.assertEqual((info['name'], info['user'], info['from']), ('my-pc', 'taeyoon', '10.0.0.7:51300'))
+        self.assertIn('connected_since', info)
+        process.stdin.close()
+        await process.wait()
+
+    async def test_tokens_from_before_identity_still_work(self):
+        spoke = await self.server('gpu1')
+        token = self.enroll('gpu1')  # enrolled without hub identity
+        process, reply = await self.endpoint_session([{'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token}], '')
+        self.assertEqual(reply['op'], 'hello_ok')
+        await until(lambda: spoke.link is not None)
+        self.assertNotIn('name', spoke.link.info)
+        self.assertIsNone(spoke.link.info['from'])
+        process.stdin.close()
+        await process.wait()

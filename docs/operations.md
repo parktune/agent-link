@@ -83,7 +83,9 @@ agent-hub revoke                    # 서버: 토큰 해시 삭제, 현재 연�
 hubctl hosts            # 호스트별 연결 상태, 재연결 횟수, 마지막 오류
 hubctl agents [필터]     # 전체 에이전트
 hubctl log --limit 50   # 라우팅된 메시지 메타데이터(본문 없음)
-agent-hub status        # 서버: hub 연결, outbox 길이, 에이전트
+agent-hub status        # 서버: hub 연결과 그 hub의 이름·사용자·접속 주소, 등록된 hub 목록, outbox 길이, 에이전트
 ```
 
 구조화 로그(JSON Lines)는 `~/.local/state/agent-link/hub/hub.log`와 `~/.local/state/agent-link/spoke/spoke.log`에 남는다. 메시지 본문은 기록하지 않는다.
+
+`agent-hub status`의 `hub`에는 지금 연결된 hub의 `name`(hostname), `user`, `from`(SSH 접속 주소), `connected_since`, `enrolled_at`이 나온다. `name`과 `user`는 hub가 스스로 밝힌 값이라 확인용일 뿐 인증에는 쓰지 않는다. 인증은 토큰으로만 한다. `from`은 서버의 SSH endpoint가 직접 채운다. 0.5.5 이전에 등록한 hub는 연결 뒤 `name`·`user`가 보이고, `enrolled_hubs`에는 이름 없이 등록 시각만 나온다.

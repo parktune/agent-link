@@ -24,6 +24,17 @@ INVITE_ATTEMPTS = 5
 PRESENCE_INTERVAL = 30
 
 
+def hub_identity(value):
+    """Who the hub says it is. Self-reported, so shown for information only, never used for auth."""
+    value = value if isinstance(value, dict) else {}
+    clean = {}
+    for key in ('name', 'user'):
+        text = value.get(key)
+        if isinstance(text, str) and text and len(text) <= 64 and text.isprintable():
+            clean[key] = text
+    return clean
+
+
 def digest(secret):
     return hashlib.sha256(secret.encode()).hexdigest()
 
@@ -44,6 +55,9 @@ class SpokeStore:
             CREATE TABLE IF NOT EXISTS outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
                 body TEXT NOT NULL, size INTEGER NOT NULL, at REAL NOT NULL);
         ''')
+        # Hub identity recorded at enrollment (self-reported name/user); absent before 0.5.5.
+        if 'hub' not in {row[1] for row in self.db.execute('PRAGMA table_info(tokens)')}:
+            self.db.execute("ALTER TABLE tokens ADD COLUMN hub TEXT NOT NULL DEFAULT '{}'")
         # 0.4.0 stored an account label per agent; it is no longer used.
         if 'account' in {row[1] for row in self.db.execute('PRAGMA table_info(agents)')}:
             self.db.execute('ALTER TABLE agents DROP COLUMN account')
@@ -59,7 +73,7 @@ class SpokeStore:
         self.db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', ('invitation', value))
         return '-'.join(raw[i:i + 4] for i in range(0, 16, 4)), expires
 
-    def enroll(self, code, token):
+    def enroll(self, code, token, hub=None):
         if not isinstance(code, str) or not isinstance(token, str) or not 40 <= len(token) <= 128:
             raise ProtocolError('unauthorized', 'invalid enrollment')
         normalized = code.upper().replace('-', '').replace(' ', '')
@@ -73,17 +87,26 @@ class SpokeStore:
                 self.db.execute("UPDATE settings SET value=? WHERE key='invitation'", (json.dumps(invitation),))
                 rejected = True
             else:
-                self.db.execute('INSERT OR REPLACE INTO tokens VALUES (?,?)', (digest(token), time.time()))
+                self.db.execute('INSERT OR REPLACE INTO tokens(hash, created, hub) VALUES (?,?,?)',
+                                (digest(token), time.time(), json.dumps(hub_identity(hub))))
                 self.db.execute("DELETE FROM settings WHERE key='invitation'")
                 rejected = False
         if rejected:
             raise ProtocolError('unauthorized', 'invitation code rejected')
 
     def check_token(self, token):
+        """The enrollment record for a valid token (created, hub identity), else None."""
         if not isinstance(token, str) or len(token) > 128:
-            return False
+            return None
         hashed = digest(token)
-        return any(hmac.compare_digest(hashed, row[0]) for row in self.db.execute('SELECT hash FROM tokens'))
+        for row in self.db.execute('SELECT hash, created, hub FROM tokens'):
+            if hmac.compare_digest(hashed, row[0]):
+                return {'enrolled_at': row[1], **json.loads(row[2] or '{}')}
+        return None
+
+    def enrolled_hubs(self):
+        return [{'enrolled_at': row[0], **json.loads(row[1] or '{}')}
+                for row in self.db.execute('SELECT created, hub FROM tokens ORDER BY created')]
 
     def revoke(self):
         with self.db:
@@ -482,12 +505,19 @@ class OutboxUplink:
             future.set_result(result or {})
 
 
+def peer(frame):
+    """SSH client address the endpoint attached (from SSH_CONNECTION), if any."""
+    value = frame.get('peer')
+    return value if isinstance(value, str) and len(value) <= 128 and value.isprintable() else None
+
+
 class LinkSession:
     """The authenticated hub connection, relayed by the SSH endpoint (8.2, 8.3)."""
 
     def __init__(self, spoke, reader, writer):
         self.spoke, self.reader, self.writer = spoke, reader, writer
         self.lock = asyncio.Lock()
+        self.info = {}
 
     async def send(self, frame):
         async with self.lock:
@@ -500,20 +530,24 @@ class LinkSession:
         spoke = self.spoke
         try:
             if first['op'] == 'enroll':
-                spoke.store.enroll(first.get('code'), first.get('token'))
-                spoke.log('hub_enrolled', host=spoke.host)
+                spoke.store.enroll(first.get('code'), first.get('token'), first.get('hub'))
+                spoke.log('hub_enrolled', host=spoke.host, hub=hub_identity(first.get('hub')), peer=peer(first))
                 await self.send({'op': 'enroll_ok', 'host': spoke.host})
                 return
             if first.get('v') != PROTOCOL_VERSION:
                 raise ProtocolError('unsupported_version', f'expected protocol {PROTOCOL_VERSION}')
-            if not spoke.store.check_token(first.get('token')):
+            record = spoke.store.check_token(first.get('token'))
+            if record is None:
                 raise ProtocolError('unauthorized', 'peer token rejected')
+            # The name/user the hub reports now wins over the one recorded at enrollment.
+            self.info = {**record, **hub_identity(first.get('hub')), 'from': peer(first),
+                         'connected_since': time.time()}
             if spoke.link:
                 spoke.link.close()  # one hub connection per host; the newest wins
             spoke.link = self
             await self.send({'op': 'hello_ok', 'v': PROTOCOL_VERSION, 'host': spoke.host,
                              'caps': ['stream', 'exchange', 'mirror']})
-            spoke.log('hub_connected', host=spoke.host, outbox=spoke.store.outbox_stats())
+            spoke.log('hub_connected', host=spoke.host, hub=self.info, outbox=spoke.store.outbox_stats())
             for frame in spoke.store.outbox_after(0):
                 await self.send(frame)
             await self.send(spoke.presence())
