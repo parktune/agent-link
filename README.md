@@ -10,15 +10,21 @@
 
 ## 사용법
 
-Claude에서는 `/agent-link`, Codex에서는 `$agent-link` 뒤에 받을 세션과 내용을 씁니다.
+agent-link는 Claude Code·Codex 플러그인으로 설치되며 스킬이 두 개입니다.
+
+| 스킬 | Claude | Codex | 하는 일 |
+|---|---|---|---|
+| 등록 | `/agent-link:register [이름]` | `$agent-link:register [이름]` | 이 세션을 등록합니다. 이름을 안 주면 `/rename`으로 붙인 세션 이름을 씁니다 |
+| 보내기·확인 | `/agent-link:send <세션> <내용>` | `$agent-link:send <세션> <내용>` | 메시지를 보냅니다. 내용 없이 쓰면 받은 메시지(박스)를 확인합니다 |
 
 ```
-/agent-link gpu-server-1의 project-head 세션에게 학습 현황 보고를 요청해
-$agent-link trainer 체크포인트 경로 알려줘
-/agent-link            ← 받은 메시지(박스) 확인
+/agent-link:register
+/agent-link:send gpu-server-1의 project-head 세션에게 학습 현황 보고를 요청해
+$agent-link:send trainer 체크포인트 경로 알려줘
+/agent-link:send            ← 받은 메시지(박스) 확인
 ```
 
-- 세션에서 처음 쓰면 그 세션을 등록합니다. 이름은 따로 말하지 않으면 `/rename`으로 붙인 세션 이름을 쓰고, 세션 이름이 없을 때만 묻습니다. 세션 ID는 `호스트:도구:이름`입니다(예: `gpu-server-1:claude:project-head`, 로컬 PC는 `local:claude:main`).
+- 등록하지 않은 세션에서 `send`를 쓰면 세션 이름(`/rename`)으로 자동 등록하고 진행합니다. 세션 이름이 없을 때만 `register`를 먼저 쓰라고 안내합니다. 세션 ID는 `호스트:도구:이름`입니다(예: `gpu-server-1:claude:project-head`, 로컬 PC는 `local:claude:main`).
 - 보낸 세션은 기다리지 않고 하던 일을 계속합니다. 회신은 나중에 도착합니다.
 - **받는 쪽:** 세션이 열려 있으면 그 세션에 바로 들어갑니다.
   - Claude: `claude --dangerously-load-development-channels server:agent-link`로 시작한 세션이어야 합니다.
@@ -26,7 +32,7 @@ $agent-link trainer 체크포인트 경로 알려줘
 - 바로 넣을 수 없으면 박스에 저장합니다. 세션이 닫혀 있거나, push가 안 되는 세션이거나, push가 실패한 경우입니다.
   - 로컬 PC: `<repo>/hub/<tool>-<name>/received/*.md`
   - 서버: `<repo>/spoke/<tool>-<name>/received/*.md`
-  - 메시지 1건이 Markdown 파일 1개입니다. `/agent-link`로 확인하면 `received/read/`로 옮깁니다.
+  - 메시지 1건이 Markdown 파일 1개입니다. `/agent-link:send`로 확인하면 `received/read/`로 옮깁니다.
 - 서버 세션은 기본적으로 **받은 요청에 대한 회신만** 보낼 수 있습니다(`allow_origination`). 회신에 다시 회신하는 것은 거부합니다(에이전트 간 무한 핑퐁 방지).
 
 ## 설치와 연결

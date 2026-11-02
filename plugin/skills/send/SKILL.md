@@ -1,27 +1,24 @@
 ---
-name: agent-link
-description: Send a message to another AI agent session (Claude Code or Codex, on this machine or another server) through agent-link, check this session's agent-link mailbox, or register this session. Use when the user invokes /agent-link or $agent-link, names another agent session to message ("gpu-server-1의 project-head 세션에게 ..."), or asks about received agent messages.
+name: send
+description: Send a message to another AI agent session (Claude Code or Codex, on this machine or another server) through agent-link, or read this session's agent-link mailbox. Use when the user invokes agent-link:send (/agent-link:send, $agent-link:send), names another agent session to message ("gpu-server-1의 project-head 세션에게 ..."), or asks about received agent messages. Registration itself is agent-link:register.
 ---
 
-# agent-link
+# agent-link: send
 
 agent-link connects Claude Code and Codex sessions across the user's PC and servers. Every session has an ID `host:tool:name` (for example `gpu-server-1:claude:project-head`; sessions on the user's PC use host `local`). Use the `agent-link` MCP tools: `whoami`, `register`, `list_agents`, `send_message`, `check_box`, `recent_messages`.
 
-The user's text after `/agent-link` / `$agent-link` is usually `<agent> <message>`. With no text, or "확인", "box", "inbox", check the mailbox.
+The user's text after the command is usually `<agent> <message>`. With no text, or "확인", "box", "inbox", check the mailbox (section 3).
 
 ## 1. Make sure this session is registered
 
-Call `whoami` first. If `registered` is false:
+Call `whoami`.
 
-1. Pick the name. If the user named one for this session, use it. Otherwise use the session's own name: `whoami` shows it as `session_name` (set with `/rename`). Do not ask when `session_name` is present and valid; just register with it.
-   If there is no `session_name`, or it is not a valid agent name (1-64 letters, digits, `_ . -`), ask the user in one short question, suggesting `/rename <name>`. Never invent or guess a name.
-2. Codex only: find the thread for push. Run `printenv CODEX_THREAD_ID`. If it prints an ID, pass it as `thread_id` (the `/rename` name is then looked up from it). If it is empty, ask the user to name the session with `/rename <name>` and pass that name as `thread_id`. Without it, messages for this session go to the mailbox only.
-3. Call `register(thread_id?)` to use the session name, or `register(name, thread_id?)` when the user gave a name. Tell the user the resulting ID and mailbox folder.
-4. If `push.available` is false, explain once:
-   - Claude: start Claude Code with `claude --dangerously-load-development-channels server:agent-link` to receive messages live in this session. Until then they are saved to the mailbox.
-   - Codex: the thread is unknown (step 2), so messages are saved to the mailbox.
-
-If `daemon_connected` is false, the hub (`hubctl serve`, user's PC) or spoke daemon (`agent-hub daemon`, server) is not running. Say so and stop; do not start it yourself.
+- `daemon_connected` false: the hub (`hubctl serve`, user's PC) or spoke daemon (`agent-hub daemon`, server) is not running. Say so and stop; do not start it yourself.
+- `registered` false: register quietly under the session's own name and go on.
+  - Claude: if `whoami` shows a valid `session_name` (set with `/rename`), call `register()` with no arguments.
+  - Codex: run `printenv CODEX_THREAD_ID`; if it prints an ID, call `register(thread_id=<ID>)`.
+  - If that fails (no `/rename` name, or the name has characters other than letters, digits, `_ . -`), stop and tell the user to name the session with `/rename <name>` or run `agent-link:register` (`/agent-link:register`, Codex `$agent-link:register`). Never invent a name.
+  - Mention the registered ID in one line. If `push.available` is false, add once that messages for this session go to its mailbox (registration explains how to receive them live).
 
 ## 2. Send a message
 
@@ -31,7 +28,7 @@ If `daemon_connected` is false, the hub (`hubctl serve`, user's PC) or spoke dae
    - `delivered`: pushed into the open session.
    - `stored` / `stored_offline`: saved to the receiver's mailbox (it was not reachable live, or is closed).
    - `queued`: this server cannot reach the hub right now; it is sent when the hub reconnects.
-   - Errors: `not_found`, `ambiguous` (use the full ID), `offline` (that host is not connected), `origination_denied` (this server only allows replies), `too_large`.
+   - Errors: `not_found` (that session is not registered yet), `ambiguous` (use the full ID), `offline` (that host is not connected), `origination_denied` (this server only allows replies), `too_large`.
 
 ## 3. Check the mailbox
 

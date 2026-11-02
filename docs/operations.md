@@ -12,7 +12,7 @@ git clone https://github.com/parktune/agent-link.git ~/work/agent-link && ~/work
 
 1. Python 3.11 이상으로 `.venv`를 만든다. python3.13 → 3.12 → 3.11 → python3 순으로 찾고, 없으면 uv가 있을 때 3.12를 받는다.
 2. `pip install -e .`
-3. `scripts/install.py --replace`로 `~/.claude/skills`, `~/.codex/skills`에 스킬을, `claude mcp add --scope user`·`codex mcp add`로 MCP 서버를 등록한다.
+3. `scripts/install.py --replace`로 이 저장소를 로컬 플러그인 marketplace(`agent-link`)로 추가하고 `agent-link@agent-link` 플러그인(스킬 `agent-link:send`, `agent-link:register`)을 Claude Code와 Codex에 설치한다. 플러그인은 `plugin/` 폴더만 담는다(`.venv`, 박스 폴더는 복사되지 않는다). 예전 버전이 남긴 단독 `agent-link` 스킬은 지운다. `claude mcp add --scope user`·`codex mcp add`로 MCP 서버를 등록한다.
 4. `~/.local/bin`에 `hubctl`, `agent-hub`를 링크한다.
 
 ## 2. 서버 연결 (`hubctl discover` 또는 `hubctl add-host <alias>`)

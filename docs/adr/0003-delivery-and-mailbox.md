@@ -12,7 +12,7 @@
    - push 수단이 없다(`delivery=box`).
    - push가 실패했다(`stored`).
 3. 박스 위치: 로컬 PC는 `<repo>/hub/`, 서버는 `<repo>/spoke/`. 그 아래 `<tool>-<name>/received/<YYYYMMDD-HHMMSS>_<보낸ID>_<id끝8자>.md`. 읽은 파일은 `received/read/`로 옮긴다. 두 폴더 모두 git에 올리지 않는다.
-4. 세션은 그 세션에서 처음 `/agent-link`(`$agent-link`)를 쓸 때 등록한다. 사용자가 이름을 따로 지정하지 않으면 `/rename`으로 붙인 세션 이름을 쓴다. Claude는 세션 기록(`~/.claude/projects/*/<세션ID>.jsonl`의 `custom-title`), Codex는 `~/.codex/session_index.jsonl`에서 읽는다. 세션 이름이 없거나 에이전트 이름 형식에 맞지 않을 때만 묻는다. 등록은 spoke daemon(hub)에 영속 저장되고, 세션이 닫혀도 오프라인 에이전트로 남아 박스로 계속 받는다.
+4. 세션은 `agent-link:register`로 등록한다. 등록하지 않고 `agent-link:send`를 쓰면 그때 자동으로 등록한다. 사용자가 이름을 따로 지정하지 않으면 `/rename`으로 붙인 세션 이름을 쓴다. Claude는 세션 기록(`~/.claude/projects/*/<세션ID>.jsonl`의 `custom-title`), Codex는 `~/.codex/session_index.jsonl`에서 읽는다. 세션 이름이 없거나 에이전트 이름 형식에 맞지 않을 때만 묻는다. 등록은 spoke daemon(hub)에 영속 저장되고, 세션이 닫혀도 오프라인 에이전트로 남아 박스로 계속 받는다.
 
 ## 명세와의 차이
 

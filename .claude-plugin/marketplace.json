@@ -1,0 +1,14 @@
+{
+  "name": "agent-link",
+  "owner": {"name": "Taeyoon Park", "url": "https://github.com/parktune"},
+  "description": "Marketplace for the agent-link plugin",
+  "plugins": [
+    {
+      "name": "agent-link",
+      "description": "Message Claude Code and Codex sessions on your PC and servers through an SSH hub.",
+      "source": "./plugin",
+      "category": "productivity",
+      "tags": ["agents", "messaging", "codex", "ssh"]
+    }
+  ]
+}
