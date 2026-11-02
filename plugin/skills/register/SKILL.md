@@ -39,5 +39,5 @@ Tell the user the ID and mailbox folder in one or two lines. Then:
   2. Run the command in a terminal: `agent-link --resume <session name>`. It finds this session, goes to its folder and reopens it with `--dangerously-load-development-channels server:agent-link`.
   3. The reopened session keeps its registration; `/agent-link:settings` shows `push.available` true.
 
-  If there is no `session_name`, `restart.command` already resumes by session ID. Otherwise add `restart.by_id` as the fallback for when the name matches more than one session. If this session was started with other claude flags (a model, permissions), mention that they can be added after `--` (`agent-link --resume <name> -- --model …`) or that `restart.full` keeps them all. Do not run any of these commands yourself.
+  If there is no `session_name`, `restart.command` already resumes by session ID. Otherwise add `restart.by_id` as the fallback for when the name matches more than one session. If this session was started with other claude flags (a model, permissions), mention that they can be added after `--` (`agent-link --resume <name> -- --model ...`) or that `restart.full` keeps them all. Do not run any of these commands yourself.
 - **Codex:** with a thread (`push.available` true) messages are queued into this session (`codex queue`); without one they go to the mailbox.

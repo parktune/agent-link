@@ -7,15 +7,15 @@ description: Show or change this Claude Code or Codex session's agent-link setti
 
 Shows and changes this session's agent-link settings with the `agent-link` MCP tools `whoami`, `register`, `unregister` and `set_watch`. The session's ID is `host:tool:name`. Sending and reading messages is `/agent-link` (Codex `$agent-link`).
 
-The text after the command picks the action:
+The text after the command picks the action. The user may write it in any language; match the meaning.
 
 | Text | Action |
 |---|---|
-| (none), `status`, "상태" | Show (section 2) |
-| `register [name]`, "등록 [이름]", a bare name | Register (section 3) |
-| `unregister`, "철회", "등록 해제" | Withdraw (section 4) |
-| `watch on`, "감시 시작" | Watch on (section 5) |
-| `watch off`, "감시 종료" | Watch off (section 5) |
+| (none), `status` | Show (section 2) |
+| `register [name]`, a bare name | Register (section 3) |
+| `unregister`, "withdraw" | Withdraw (section 4) |
+| `watch on`, "start watching" | Watch on (section 5) |
+| `watch off`, "stop watching" | Watch off (section 5) |
 
 If the text matches none of these, show the settings and ask which one to change.
 
