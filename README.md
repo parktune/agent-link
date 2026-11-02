@@ -30,8 +30,10 @@ SSH로 들어가 daemon을 띄우고, 1회용 초대로 토큰을 등록하고, 
 
 **미리 준비할 것** (서버마다)
 - 그 서버에 위의 설치가 끝나 있어야 합니다.
-- `ssh <alias>`가 비밀번호 없이 되어야 합니다.
+- `ssh <alias>`가 SSH 키로 비밀번호 입력 없이 되어야 합니다. hub는 백그라운드에서 다시 접속하므로 비밀번호를 받을 수 없습니다.
 - 서버 host key가 known_hosts에 있어야 합니다. agent-link는 처음 보는 host key를 자동으로 받아들이지 않습니다.
+
+준비 방법(키 등록, passphrase 키와 ssh-agent, host key, 오류별 해결)은 [SSH 준비](docs/ssh-setup.md)에 있습니다. `ssh -o BatchMode=yes <alias> true`가 성공하면 준비된 상태입니다.
 
 연결되면 `agent-link status`에 `servers N/N connected`가 나옵니다. 이후 세션은 아래 사용법대로 `agent-link claude|codex resume <세션 이름>`으로 엽니다.
 
