@@ -18,8 +18,8 @@
 
 | 방향 | 프레임 | 설명 |
 |---|---|---|
-| hub → host | `hello {v, token, hub?}` | 응답 `hello_ok {v, host, caps}`. 같은 호스트에 새 연결이 오면 이전 연결을 닫는다. `hub`는 `{name, user}`로 hub가 스스로 밝히는 이름이며 표시용이다 |
-| hub → host | `enroll {code, token, hub?}` | 응답 `enroll_ok {host}`. 첫 프레임으로만 허용한다. 서버는 토큰 해시 옆에 `hub` 이름을 저장한다 |
+| hub → host | `hello {v, token, hub?, host?}` | 응답 `hello_ok {v, host, caps}`. 같은 호스트에 새 연결이 오면 이전 연결을 닫는다. `hub`는 `{name, user}`로 hub가 스스로 밝히는 이름이며 표시용이다. `host`는 hub가 페어링 때 저장한 호스트 이름이다(0.5.7). 서버는 이 토큰의 페어링 이름이 비어 있으면 그 값으로 채우고, 지금 daemon 이름과 다르면 `error host_mismatch`(고치는 방법이 든 `detail`)로 거부한다. hub도 `hello_ok.host`가 다르면 같은 코드로 끊는다 |
+| hub → host | `enroll {code, token, hub?}` | 응답 `enroll_ok {host}`. 첫 프레임으로만 허용한다. 서버는 토큰 해시 옆에 `hub` 이름과 페어링한 호스트 이름(`host`)을 저장한다 |
 | hub → host | `deliver {msg}` | 응답 `delivered {id, status}` 또는 `error {id, code}`. status: `delivered`, `stored`, `stored_offline` |
 | hub → host | `ack {seq, result?}` | outbox를 `seq`까지 처리했다는 뜻이다. `result`는 그 메시지의 라우팅 결과(`{id, status}` 또는 `{id, error}`)이며, 기다리고 있는 보낸 세션에 전달한다 |
 | hub → host | `exchange {after, deliver[]}` | poll 모드. 응답 `exchange_ok {results, outbox, presence}` |

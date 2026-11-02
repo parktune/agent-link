@@ -160,7 +160,7 @@ class HostLink:
         self.token = record['token']
         self.connected = False
         self.reconnects = 0
-        self.last_error = None
+        self.last_error = self.last_error_detail = None
         self.pending = {}
         self.writer = None
         self.lock = asyncio.Lock()
@@ -168,7 +168,18 @@ class HostLink:
 
     def status(self):
         return {'host': self.name, 'connected': self.connected, 'reconnects': self.reconnects,
-                'last_error': self.last_error, 'mode': 'stream'}
+                'last_error': self.last_error, 'last_error_detail': self.last_error_detail, 'mode': 'stream'}
+
+    def hello(self):
+        # `host` tells the server the name it was paired under, so it can keep it or explain a mismatch.
+        return {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': self.token, 'hub': hub_identity(), 'host': self.name}
+
+    def check_hello(self, hello):
+        if hello['op'] != 'hello_ok':
+            raise ProtocolError('unauthorized', f'unexpected hello from {self.name}')
+        if hello.get('host') != self.name:  # a server older than 0.5.7 does not check this itself
+            raise ProtocolError('host_mismatch', f'{self.name} answers as host "{hello.get("host")}" but was paired as '
+                                f'"{self.name}"; restart its daemon with the paired name, or pair again')
 
     def start(self):
         self.task = asyncio.create_task(self.run())
@@ -188,11 +199,13 @@ class HostLink:
                 raise
             except (ProtocolError, OSError, ConnectionError, TimeoutError, ValueError) as error:
                 self.last_error = getattr(error, 'code', type(error).__name__)
+                self.last_error_detail = getattr(error, 'detail', None) or str(error) or None
             self.disconnected()
             if time.monotonic() - started > BACKOFF_MAX:
                 delay = 1
             wait = delay * random.uniform(0.8, 1.2)
-            self.hub.log('host_backoff', host=self.name, seconds=round(wait, 2), error=self.last_error)
+            self.hub.log('host_backoff', host=self.name, seconds=round(wait, 2), error=self.last_error,
+                         **({'detail': self.last_error_detail} if self.last_error == 'host_mismatch' else {}))
             await asyncio.sleep(wait)
             delay = min(delay * 2, BACKOFF_MAX)
 
@@ -217,12 +230,11 @@ class HostLink:
         reader, writer, process = await asyncio.wait_for(self.transport.open(), CONNECT_TIMEOUT)
         stderr_task = asyncio.create_task(drain(process))
         try:
-            hello = await handshake(reader, writer, {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': self.token, 'hub': hub_identity()})
-            if hello['op'] != 'hello_ok' or hello.get('host') != self.name:
-                raise ProtocolError('unauthorized', f'unexpected hello from {self.name}')
+            hello = await handshake(reader, writer, self.hello())
+            self.check_hello(hello)
             self.writer, self.connected = writer, True
             self.reconnects += 1
-            self.last_error = None
+            self.last_error = self.last_error_detail = None
             self.hub.log('host_connected', host=self.name, connections=self.reconnects)
             queue = asyncio.Queue()
             worker = asyncio.create_task(self.process_outbox(queue))
@@ -298,12 +310,13 @@ class PollLink(HostLink):
         while True:
             try:
                 active = await self.exchange()
-                self.connected, self.last_error = True, None
+                self.connected, self.last_error, self.last_error_detail = True, None, None
                 interval = POLL_ACTIVE if active else min(interval * 2, POLL_IDLE)
             except asyncio.CancelledError:
                 raise
             except (ProtocolError, OSError, ConnectionError, TimeoutError, ValueError) as error:
                 self.last_error = getattr(error, 'code', type(error).__name__)
+                self.last_error_detail = getattr(error, 'detail', None) or str(error) or None
                 self.disconnected()
                 interval = min(max(interval, 1) * 2, BACKOFF_MAX)
             self.wake.clear()
@@ -316,9 +329,8 @@ class PollLink(HostLink):
         batch, self.queue = self.queue[:16], self.queue[16:]
         reader, writer, process = await asyncio.wait_for(self.transport.open(), CONNECT_TIMEOUT)
         try:
-            hello = await handshake(reader, writer, {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': self.token, 'hub': hub_identity()})
-            if hello.get('host') != self.name:
-                raise ProtocolError('unauthorized', f'unexpected hello from {self.name}')
+            hello = await handshake(reader, writer, self.hello())
+            self.check_hello(hello)
             after = self.hub.store.last_seq(self.name)
             writer.write(encode({'op': 'exchange', 'after': after, 'deliver': [m for m, _ in batch]}))
             await writer.drain()

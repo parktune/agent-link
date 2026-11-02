@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import secrets
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -177,7 +178,8 @@ async def add_host(args, store):
     if store.host(name):
         raise SystemExit(f'host name {name} is already registered; remove-host first')
     store.add_host(name, args.alias, remote_path, token, args.remote_socket, args.mode, args.ssh_config)
-    hello = await one_shot(transport, {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token, 'hub': hub_identity()})
+    hello = await one_shot(transport, {'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token, 'hub': hub_identity(),
+                                       'host': name})
     if hello.get('op') != 'hello_ok':
         raise SystemExit('Token check after enrollment failed')
     say(f'[3/4] enrolled as host "{name}" (token verified)')
@@ -311,6 +313,23 @@ def configured_host_name():
         return tomllib.load(handle).get('host_name') or None
 
 
+def daemon_host_name(store, flag=None):
+    """Host name for this server's daemon: config.toml `host_name`, else the name it was paired under, else
+    --host-name (the hub's suggestion at first pairing), else None (the short hostname)."""
+    return configured_host_name() or store.paired_host() or flag or None
+
+
+def stop_daemon(wait=15):
+    """Stop the running daemon (systemd service or background process) and wait for its socket to close."""
+    pid = asyncio.run(ask(default_socket(), 'status'))['pid']
+    os.kill(pid, signal.SIGTERM)
+    deadline = time.monotonic() + wait
+    while service.alive():
+        if time.monotonic() > deadline:
+            raise SystemExit(f'agent-link daemon (pid {pid}) did not stop')
+        time.sleep(0.1)
+
+
 def spoke_store():
     return SpokeStore(private_directory(state_root() / 'spoke') / 'spoke.sqlite3')
 
@@ -320,9 +339,12 @@ def agent_hub(argv=None):
     commands = parser.add_subparsers(dest='command', required=True)
     daemon = commands.add_parser('daemon', help='Run the spoke daemon (one per host)')
     daemon.add_argument('--socket', type=Path)
-    daemon.add_argument('--host-name', help='Host name in agent IDs (default: config or short hostname)')
+    daemon.add_argument('--host-name', help='Host name in agent IDs when config.toml has none and the server is '
+                        'not paired yet (default: short hostname)')
     up = commands.add_parser('up', help='Start the daemon in the background if it is not running')
-    up.add_argument('--host-name', help='Host name in agent IDs when starting (config host_name wins)')
+    up.add_argument('--host-name', help='Host name in agent IDs at first pairing (config host_name and the '
+                    'paired name win)')
+    up.add_argument('--restart', action='store_true', help='Restart a running daemon (e.g. to take the paired name)')
     up.add_argument('--invite', action='store_true', help='Also issue a one-use invitation (for hubctl add-host)')
     up.add_argument('--json', action='store_true')
     commands.add_parser('endpoint', help='SSH forced command').add_argument('--socket', type=Path)
@@ -351,8 +373,10 @@ def agent_hub(argv=None):
     store = spoke_store()
     if args.command == 'up':
         how = None
+        if args.restart and service.alive():
+            stop_daemon()
         if not service.alive():
-            how = service.start('spoke', host_name=configured_host_name() or args.host_name)
+            how = service.start('spoke', host_name=daemon_host_name(store, args.host_name))
         info = asyncio.run(ask(default_socket(), 'status'))
         result = {'host': info['host'], 'path': service.executable('agent-hub'), 'started': how}
         if args.invite:
@@ -363,7 +387,7 @@ def agent_hub(argv=None):
             print(f'agent-link daemon for host "{info["host"]}" is {"running" if not how else "started (" + how + ")"}.')
         return 0
     if args.command == 'daemon':
-        config = Config.load(host_name=args.host_name)
+        config = Config.load(host_name=daemon_host_name(store, args.host_name))
         spoke = Spoke(config, store, stderr_log(state_root() / 'spoke' / 'spoke.log'), Box(default_box_root('spoke')))
         spoke.extra_ops = {'drop_link': lambda frame: drop_link(spoke), 'status': lambda frame: status(spoke)}
         try:

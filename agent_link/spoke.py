@@ -15,7 +15,7 @@ import os
 import secrets
 import time
 
-from .protocol import (HUB_TO_HOST, PROTOCOL_VERSION, TYPES, FRAME_LIMIT, ProtocolError, agent_id, check_name,
+from .protocol import (HUB_TO_HOST, NAME, PROTOCOL_VERSION, TYPES, FRAME_LIMIT, ProtocolError, agent_id, check_name,
                        check_tool, make_message, metadata, parse_target, read_frame, validate_message, write_frame)
 from .state import open_db
 
@@ -58,6 +58,9 @@ class SpokeStore:
         # Hub identity recorded at enrollment (self-reported name/user); absent before 0.5.5.
         if 'hub' not in {row[1] for row in self.db.execute('PRAGMA table_info(tokens)')}:
             self.db.execute("ALTER TABLE tokens ADD COLUMN hub TEXT NOT NULL DEFAULT '{}'")
+        # The host name this server was paired under; absent before 0.5.7 (filled from the hub's next hello).
+        if 'host' not in {row[1] for row in self.db.execute('PRAGMA table_info(tokens)')}:
+            self.db.execute("ALTER TABLE tokens ADD COLUMN host TEXT NOT NULL DEFAULT ''")
         # 0.4.0 stored an account label per agent; it is no longer used.
         if 'account' in {row[1] for row in self.db.execute('PRAGMA table_info(agents)')}:
             self.db.execute('ALTER TABLE agents DROP COLUMN account')
@@ -73,7 +76,7 @@ class SpokeStore:
         self.db.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', ('invitation', value))
         return '-'.join(raw[i:i + 4] for i in range(0, 16, 4)), expires
 
-    def enroll(self, code, token, hub=None):
+    def enroll(self, code, token, hub=None, host=''):
         if not isinstance(code, str) or not isinstance(token, str) or not 40 <= len(token) <= 128:
             raise ProtocolError('unauthorized', 'invalid enrollment')
         normalized = code.upper().replace('-', '').replace(' ', '')
@@ -87,22 +90,31 @@ class SpokeStore:
                 self.db.execute("UPDATE settings SET value=? WHERE key='invitation'", (json.dumps(invitation),))
                 rejected = True
             else:
-                self.db.execute('INSERT OR REPLACE INTO tokens(hash, created, hub) VALUES (?,?,?)',
-                                (digest(token), time.time(), json.dumps(hub_identity(hub))))
+                self.db.execute('INSERT OR REPLACE INTO tokens(hash, created, hub, host) VALUES (?,?,?,?)',
+                                (digest(token), time.time(), json.dumps(hub_identity(hub)), host or ''))
                 self.db.execute("DELETE FROM settings WHERE key='invitation'")
                 rejected = False
         if rejected:
             raise ProtocolError('unauthorized', 'invitation code rejected')
 
     def check_token(self, token):
-        """The enrollment record for a valid token (created, hub identity), else None."""
+        """The enrollment record for a valid token (created, hub identity, paired host name), else None."""
         if not isinstance(token, str) or len(token) > 128:
             return None
         hashed = digest(token)
-        for row in self.db.execute('SELECT hash, created, hub FROM tokens'):
+        for row in self.db.execute('SELECT hash, created, hub, host FROM tokens'):
             if hmac.compare_digest(hashed, row[0]):
-                return {'enrolled_at': row[1], **json.loads(row[2] or '{}')}
+                return {'enrolled_at': row[1], **json.loads(row[2] or '{}'), 'paired_as': row[3]}
         return None
+
+    def remember_host(self, token, host):
+        """Record the paired host name of a token enrolled before 0.5.7 (never overwrites one)."""
+        self.db.execute("UPDATE tokens SET host=? WHERE hash=? AND host=''", (host, digest(token)))
+
+    def paired_host(self):
+        """The host name of the latest pairing, so a restarted daemon keeps the name the hub knows."""
+        row = self.db.execute("SELECT host FROM tokens WHERE host != '' ORDER BY created DESC").fetchone()
+        return row[0] if row else None
 
     def enrolled_hubs(self):
         return [{'enrolled_at': row[0], **json.loads(row[1] or '{}')}
@@ -530,7 +542,7 @@ class LinkSession:
         spoke = self.spoke
         try:
             if first['op'] == 'enroll':
-                spoke.store.enroll(first.get('code'), first.get('token'), first.get('hub'))
+                spoke.store.enroll(first.get('code'), first.get('token'), first.get('hub'), spoke.host)
                 spoke.log('hub_enrolled', host=spoke.host, hub=hub_identity(first.get('hub')), peer=peer(first))
                 await self.send({'op': 'enroll_ok', 'host': spoke.host})
                 return
@@ -539,6 +551,16 @@ class LinkSession:
             record = spoke.store.check_token(first.get('token'))
             if record is None:
                 raise ProtocolError('unauthorized', 'peer token rejected')
+            paired = record['paired_as']
+            expected = first.get('host')  # the name the hub stored at pairing (0.5.7+ hubs send it)
+            if not paired and isinstance(expected, str) and NAME.fullmatch(expected):
+                spoke.store.remember_host(first['token'], expected)
+                paired = record['paired_as'] = expected
+            if paired and paired != spoke.host:
+                raise ProtocolError('host_mismatch', f'this daemon runs as "{spoke.host}" but was paired with the hub '
+                                    f'as "{paired}". On this server run `agent-hub up --restart` (it uses the paired '
+                                    'name unless config.toml sets host_name), or pair again: hubctl remove-host, '
+                                    'then hubctl add-host')
             # The name/user the hub reports now wins over the one recorded at enrollment.
             self.info = {**record, **hub_identity(first.get('hub')), 'from': peer(first),
                          'connected_since': time.time()}
@@ -554,7 +576,7 @@ class LinkSession:
             while (frame := await read_frame(self.reader)) is not None:
                 await self.handle(frame)
         except ProtocolError as error:
-            spoke.log('hub_rejected', code=error.code)
+            spoke.log('hub_rejected', code=error.code, **({'detail': error.detail} if error.code == 'host_mismatch' else {}))
             try:
                 await self.send(error.frame())
             except ConnectionError:

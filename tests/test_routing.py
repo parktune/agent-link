@@ -1,8 +1,12 @@
 """Scenarios from spec chapter 14 that run without models."""
 import asyncio
 import json
+import os
+from pathlib import Path
+import tempfile
+from unittest import mock
 
-from agent_link.protocol import PROTOCOL_VERSION, encode, read_frame
+from agent_link.protocol import PROTOCOL_VERSION, ProtocolError, encode, read_frame
 from agent_link.spoke import INVITE_ATTEMPTS
 from tests.support import Environment, until
 
@@ -327,3 +331,60 @@ class HubIdentityTests(Environment):
         self.assertIsNone(spoke.link.info['from'])
         process.stdin.close()
         await process.wait()
+
+
+class PairedNameTests(Environment):
+    """The host name chosen at pairing is kept on the server, so a restarted daemon cannot drift from the hub."""
+
+    endpoint_session = HubIdentityTests.endpoint_session
+
+    async def test_pairing_records_the_name_and_a_restart_keeps_it(self):
+        spoke = await self.server('gpu1')
+        code, _ = spoke.store.invite()
+        process, reply = await self.endpoint_session([{'op': 'enroll', 'code': code, 'token': 'T' * 43}], '')
+        self.assertEqual(reply, {'op': 'enroll_ok', 'host': 'gpu1'})
+        await process.wait()
+        self.assertEqual(spoke.store.paired_host(), 'gpu1')
+        from agent_link import cli
+        with tempfile.TemporaryDirectory() as state, mock.patch.dict(os.environ, {'AGENT_HUB_STATE': state}):
+            # `agent-hub up` without a name (or with the hostname) still comes back as the paired name.
+            self.assertEqual(cli.daemon_host_name(spoke.store, 'gpu58'), 'gpu1')
+            Path(state, 'config.toml').write_text('host_name = "chosen"\n')
+            self.assertEqual(cli.daemon_host_name(spoke.store, 'gpu58'), 'chosen')  # an explicit setting wins
+        fresh = await self.server('gpu2')
+        with tempfile.TemporaryDirectory() as state, mock.patch.dict(os.environ, {'AGENT_HUB_STATE': state}):
+            self.assertEqual(cli.daemon_host_name(fresh.store, 'gpu-vlm'), 'gpu-vlm')  # first pairing: the hub's name
+            self.assertIsNone(cli.daemon_host_name(fresh.store))  # nothing at all: the short hostname
+
+    async def test_a_token_from_before_0_5_7_learns_the_name_from_the_hub(self):
+        spoke = await self.server('gpu1')
+        token = self.enroll('gpu1')  # stored without a host name
+        self.assertIsNone(spoke.store.paired_host())
+        process, reply = await self.endpoint_session(
+            [{'op': 'hello', 'v': PROTOCOL_VERSION, 'token': token, 'host': 'gpu1'}], '')
+        self.assertEqual(reply['op'], 'hello_ok')
+        self.assertEqual(spoke.store.paired_host(), 'gpu1')
+        process.stdin.close()
+        await process.wait()
+
+    async def test_a_daemon_under_another_name_explains_how_to_fix_it(self):
+        spoke = await self.server('gpu1')  # restarted under its hostname after pairing as gpu-vlm
+        code, _ = spoke.store.invite()
+        spoke.store.enroll(code, 'T' * 43, host='gpu-vlm')
+        process, reply = await self.endpoint_session(
+            [{'op': 'hello', 'v': PROTOCOL_VERSION, 'token': 'T' * 43, 'host': 'gpu-vlm'}], '')
+        self.assertEqual(reply['code'], 'host_mismatch')
+        self.assertIn('runs as "gpu1" but was paired with the hub as "gpu-vlm"', reply['detail'])
+        self.assertIn('agent-hub up --restart', reply['detail'])
+        self.assertIsNone(spoke.link)
+        await process.wait()
+
+    def test_the_hub_names_a_mismatch_from_an_older_server(self):
+        from agent_link.hub import HostLink
+        link = HostLink.__new__(HostLink)
+        link.name = 'gpu-vlm'
+        link.check_hello({'op': 'hello_ok', 'host': 'gpu-vlm'})
+        with self.assertRaisesRegex(ProtocolError, 'host_mismatch.*"gpu58".*"gpu-vlm"'):
+            link.check_hello({'op': 'hello_ok', 'host': 'gpu58'})
+        with self.assertRaisesRegex(ProtocolError, 'unauthorized'):
+            link.check_hello({'op': 'error'})

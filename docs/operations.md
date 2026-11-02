@@ -38,7 +38,9 @@ hubctl add-host gpu-server-1
 | 3/4 | 256-bit 토큰을 만들어 `enroll`하고 `hello`로 확인한다. 서버에는 해시만 저장된다 |
 | 4/4 | 로컬 hub가 꺼져 있으면 띄우고(`agent-link-hub` 서비스, 실패하면 백그라운드) 새 호스트에 연결됐는지 확인한다 |
 
-- 호스트 이름(에이전트 ID의 앞부분)은 alias다. `--name`으로 바꿀 수 있다. 서버의 `config.toml`에 `host_name`이 있으면 그것이 우선이고, 이미 돌고 있는 daemon이 있으면 그 이름을 쓴다.
+- 호스트 이름(에이전트 ID의 앞부분)은 페어링할 때 한 번 정해진다. 후보는 alias이고 `--name`으로 바꿀 수 있다. 서버의 `config.toml`에 `host_name`이 있으면 그것이 우선이고, 이미 돌고 있는 daemon이 있으면 그 이름을 쓴다. hub는 서버가 `enroll_ok`로 알려 준 이름을 저장한다.
+- 서버는 페어링한 이름을 토큰 옆에 저장하고(0.5.7), daemon은 뜰 때마다 `config.toml`의 `host_name` → 페어링한 이름 → `--host-name` → 짧은 hostname 순으로 고른다. 그래서 `agent-hub up`을 이름 없이 다시 실행해도 hub가 아는 이름으로 뜬다. 0.5.7 전에 페어링한 서버는 hub의 다음 `hello`에서 이름을 받아 채운다.
+- 그래도 이름이 어긋나면(예: `config.toml`의 `host_name`을 나중에 바꿈) 연결이 `host_mismatch`로 거부되고, `hubctl hosts`의 `last_error_detail`과 서버 로그에 고치는 방법이 나온다. 서버에서 `agent-hub up --restart`로 페어링한 이름으로 다시 띄우거나, 이름을 바꾸려면 `hubctl remove-host` 후 다시 `add-host`한다.
 - `agent-hub`가 다른 곳에 있으면 `--remote-path`로 지정한다.
 - systemd user 서비스는 로그아웃 후에도 유지하려면 linger가 필요하다(`loginctl enable-linger $USER`, 관리자 정책 확인). 백그라운드 프로세스는 재부팅하면 사라지지만, 다음 `hubctl add-host`나 `agent-hub up`이 다시 띄운다.
 - 수동으로 띄우려면 서버에서 `agent-hub up`(또는 포그라운드 `agent-hub daemon`), 로컬에서 `hubctl up`(또는 `hubctl serve`)을 쓴다.
@@ -68,7 +70,7 @@ agent-hub revoke                    # 서버: 토큰 해시 삭제, 현재 연�
 
 | 키 | 기본값 | 설명 |
 |---|---|---|
-| `host_name` | 짧은 hostname | 에이전트 ID의 호스트 부분 |
+| `host_name` | 페어링한 이름, 없으면 짧은 hostname | 에이전트 ID의 호스트 부분. 정하면 페어링한 이름보다 우선한다 |
 | `allow_origination` | `none` | 서버 세션이 먼저 보낼 수 있는 범위: `none`(받은 요청에 대한 회신만), `host`(같은 호스트), `all`. 로컬 PC는 항상 `all` |
 | `mirror_local_metadata` | `true` | 같은 호스트 안의 전달을 메타데이터만 hub에 보고 |
 | `max_content_bytes` | 65536 | 본문 상한 |
