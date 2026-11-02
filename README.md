@@ -30,6 +30,7 @@ $agent-link trainer 체크포인트 경로 알려줘
   - Claude: `claude --dangerously-load-development-channels server:agent-link`로 시작한 세션이어야 합니다.
   - Codex: 스레드 ID 또는 `/rename` 이름으로 등록한 세션이어야 합니다(`codex queue`).
 - 바로 넣을 수 없으면 박스에 저장합니다. 세션이 닫혀 있거나, push가 안 되는 세션이거나, push가 실패한 경우입니다.
+  - 플래그 없이 연 Claude 세션은 `/agent-link:register`(또는 첫 `/agent-link`)가 박스 감시를 백그라운드로 겁니다(`agent-hub wait-box`). 메시지가 박스에 들어오면 몇 초 안에 세션이 깨어나 읽습니다. 세션이 열려 있는 동안만 동작합니다.
   - 로컬 PC: `<repo>/hub/<tool>-<name>/received/*.md`
   - 서버: `<repo>/spoke/<tool>-<name>/received/*.md`
   - 메시지 1건이 Markdown 파일 1개입니다. `/agent-link`로 확인하면 `received/read/`로 옮깁니다.

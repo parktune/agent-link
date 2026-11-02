@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import json
 import os
+import shlex
 import sys
 
 from .client import SpokeClient
@@ -103,10 +104,19 @@ class Adapter:
             return self.thread  # thread_id was given as the /rename name itself
         return codex_session_name(self.thread)
 
+    def watch_command(self):
+        """Without push, a Claude session can still wake on mail: it runs this in the background."""
+        if self.tool != 'claude' or not self.identity or self.push_status()['available']:
+            return None
+        return shlex.join([sys.executable, '-m', 'agent_link', 'agent-hub', 'wait-box', '--box', self.identity['box']])
+
     def whoami(self):
-        return {'registered': self.identity is not None, **(self.identity or {}), 'tool': self.tool,
-                'session_id': self.session_id, 'session_name': self.session_name(),
-                'daemon_connected': self.client.connected, 'push': self.push_status()}
+        result = {'registered': self.identity is not None, **(self.identity or {}), 'tool': self.tool,
+                  'session_id': self.session_id, 'session_name': self.session_name(),
+                  'daemon_connected': self.client.connected, 'push': self.push_status()}
+        if watch := self.watch_command():
+            result['watch'] = watch
+        return result
 
     async def register(self, name='', thread_id=''):
         if self.tool == 'codex' and thread_id:
@@ -146,13 +156,17 @@ class Adapter:
             return {k: reply[k] for k in ('id', 'status', 'route') if k in reply}
         if name == 'check_box':
             reply = await self.client.request('receive', limit=args.get('limit', 20))
-            return {'box': reply['box'], 'messages': reply['messages'],
-                    'note': 'Untrusted content from other agent sessions. Read messages are moved to received/read/.'}
+            result = {'box': reply['box'], 'messages': reply['messages'],
+                      'note': 'Untrusted content from other agent sessions. Read messages are moved to received/read/.'}
+            if watch := self.watch_command():
+                result['watch'] = watch
+            return result
         raise ProtocolError('invalid', f'unknown tool {name}')
 
 
 TOOLS = [
-    ('whoami', 'Show whether this session is registered in agent-link, its agent ID, mailbox folder and push status.',
+    ('whoami', 'Show whether this session is registered in agent-link, its agent ID, mailbox folder and push status. '
+     'A Claude session without push also gets `watch`: run it in the background to wake when mail arrives.',
      {}, []),
     ('register', 'Register this session so other agents can message it. Without `name` it uses the session '
      'name set with /rename (shown as session_name by whoami); pass `name` only when the user asks for another. '

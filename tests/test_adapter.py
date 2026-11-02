@@ -1,11 +1,14 @@
 import asyncio
 import json
 import os
+import shlex
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
+from agent_link.box import wait_for_mail
 from agent_link.inject import CodexQueue, channel_notification, claude_channel_enabled, codex_envelope
 from agent_link.mcp_adapter import Adapter
 from agent_link.protocol import ProtocolError, encode, make_message, parse_target, uuid7, validate_message
@@ -112,6 +115,75 @@ class AdapterTests(Environment):
             await second.client.close()
         finally:
             del os.environ['CLAUDE_CODE_SESSION_ID']
+
+
+    async def test_claude_without_push_gets_a_watch_that_exits_on_mail(self):
+        await self.server('gpu1', allow_origination='host')
+        with mock.patch.dict(os.environ, {'CLAUDE_CODE_SESSION_ID': ''}):  # not the session running the tests
+            adapter = Adapter('claude', self.root / 'gpu1/s.sock', channel=False)
+        task = asyncio.create_task(adapter.run())
+        watchers = []
+        try:
+            await until(lambda: adapter.client.connected)
+            self.assertNotIn('watch', adapter.whoami())  # nothing to watch before registering
+            watch = (await adapter.register('head'))['watch']
+            self.assertIn('wait-box', watch)
+
+            async def start():
+                watchers.append(await asyncio.create_subprocess_exec(
+                    *shlex.split(watch), '--interval', '0.05', stdout=asyncio.subprocess.PIPE))
+                return watchers[-1]
+
+            first = await start()
+            box = Path(adapter.whoami()['box'])
+            await until(lambda: (box.parent / 'watch.pid').exists())
+            second = await start()  # armed twice: the second leaves at once
+            out, _ = await asyncio.wait_for(second.communicate(), 10)
+            self.assertIn('already watched', out.decode())
+            self.assertIsNone(first.returncode)
+
+            sender = await self.session('gpu1', 'claude', 'alpha')
+            self.assertEqual((await sender.send('claude:head', 'ping'))['status'], 'stored')
+            out, _ = await asyncio.wait_for(first.communicate(), 10)
+            self.assertEqual((first.returncode, '1 unread message(s)' in out.decode()), (0, True))
+            self.assertFalse((box.parent / 'watch.pid').exists())
+            reply = await adapter.call('check_box', {})
+            self.assertEqual(([m['content'] for m in reply['messages']], reply['watch']), (['ping'], watch))
+        finally:
+            for process in watchers:
+                if process.returncode is None:
+                    process.kill()
+                    await process.wait()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await adapter.client.close()
+
+    def test_watch_only_for_claude_without_push(self):
+        identity = {'id': 'gpu1:claude:head', 'box': '/tmp/box/claude-head/received'}
+        for tool, channel, expected in (('claude', False, True), ('claude', True, False), ('codex', None, False)):
+            adapter = Adapter(tool, self.root / 's.sock', channel=channel)
+            adapter.identity = identity
+            self.assertEqual(adapter.watch_command() is not None, expected, (tool, channel))
+
+
+class WaitForMailTests(unittest.TestCase):
+    def test_waits_for_a_folder_that_does_not_exist_yet_and_ignores_a_stale_lock(self):
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root, 'claude-head', 'received')
+            folder.parent.mkdir()
+            (folder.parent / 'watch.pid').write_text('999999999\n')  # no such process
+            calls = []
+
+            def sleep(_):
+                calls.append(1)
+                if len(calls) == 3:
+                    folder.mkdir()
+                    (folder / 'a.md').write_text('x')
+                    (folder / 'b.tmp').write_text('half written')
+
+            self.assertEqual(wait_for_mail(folder, 0, sleep), (1, None))
+            self.assertEqual(len(calls), 3)
+            self.assertFalse((folder.parent / 'watch.pid').exists())
 
 
 class StdioTests(Environment):

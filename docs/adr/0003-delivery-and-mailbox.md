@@ -14,6 +14,8 @@
 3. 박스 위치: 로컬 PC는 `<repo>/hub/`, 서버는 `<repo>/spoke/`. 그 아래 `<tool>-<name>/received/<YYYYMMDD-HHMMSS>_<보낸ID>_<id끝8자>.md`. 읽은 파일은 `received/read/`로 옮긴다. 두 폴더 모두 git에 올리지 않는다.
 4. 세션은 `agent-link:register`로 등록한다. 등록하지 않고 `/agent-link`를 쓰면 그때 자동으로 등록한다. 사용자가 이름을 따로 지정하지 않으면 `/rename`으로 붙인 세션 이름을 쓴다. Claude는 세션 기록(`~/.claude/projects/*/<세션ID>.jsonl`의 `custom-title`), Codex는 `~/.codex/session_index.jsonl`에서 읽는다. 세션 이름이 없거나 에이전트 이름 형식에 맞지 않을 때만 묻는다. 등록은 spoke daemon(hub)에 영속 저장되고, 세션이 닫혀도 오프라인 에이전트로 남아 박스로 계속 받는다.
 
+5. 플래그 없이 연 Claude 세션은 박스 감시로 깨운다(2026-11-02 추가). Channels는 실행 중에 켤 수 없고, 세션을 깨울 수 있는 것은 그 세션의 Claude가 띄운 백그라운드 작업뿐이다. 그래서 `whoami`·`register`·`check_box` 결과에 `watch` 명령(`agent-hub wait-box --box <received/>`)을 싣고, 스킬이 그것을 Bash `run_in_background`로 띄운다. 명령은 읽지 않은 `*.md`가 생기면 한 줄을 찍고 끝나며, 그 종료가 세션을 깨운다. 세션은 박스를 읽은 뒤 다시 건다. `<tool>-<name>/watch.pid`로 같은 박스에 감시가 둘 생기지 않게 한다. 받은 메시지는 tmux 입력과 달리 사용자 입력이 아니라 도구 결과로 들어가므로 "믿을 수 없는 입력" 전제가 유지된다.
+
 ## 명세와의 차이
 
 명세 2장은 "오프라인 에이전트로의 큐잉 전달"을 MVP 밖으로 두고 오프라인이면 즉시 오류를 요구한다.

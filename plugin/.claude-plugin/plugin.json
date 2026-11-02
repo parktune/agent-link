@@ -1,6 +1,6 @@
 {
   "name": "agent-link",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Register a Claude Code or Codex session in agent-link (agent-link:register). Sending is the /agent-link skill installed by setup.sh.",
   "author": {
     "name": "Taeyoon Park",

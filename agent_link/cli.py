@@ -11,7 +11,7 @@ import socket
 import subprocess
 import sys
 
-from .box import Box, default_box_root
+from .box import Box, default_box_root, wait_for_mail
 from .client import SpokeClient
 from .endpoint import relay
 from .hub import CONNECT_TIMEOUT, Hub, HubStore, SSHTransport, close_process, handshake
@@ -328,8 +328,18 @@ def agent_hub(argv=None):
     invite.add_argument('--json', action='store_true', help='Machine output for hubctl add-host')
     commands.add_parser('revoke', help='Delete the hub peer token and drop the hub connection')
     commands.add_parser('status').add_argument('--socket', type=Path)
+    wait = commands.add_parser('wait-box', help='Wait until a mailbox folder has unread mail, print one line, exit')
+    wait.add_argument('--box', type=Path, required=True, help='The received/ folder shown by whoami')
+    wait.add_argument('--interval', type=float, default=2.0, help='Seconds between checks')
     args = parser.parse_args(argv)
 
+    if args.command == 'wait-box':
+        count, other = wait_for_mail(args.box, args.interval)
+        if other:
+            print(f'agent-link: {args.box} is already watched (pid {other}); nothing to do', flush=True)
+        else:
+            print(f'agent-link: {count} unread message(s) in {args.box}; read them with /agent-link', flush=True)
+        return 0
     if args.command == 'endpoint':
         return asyncio.run(relay(args.socket or default_socket()))
     store = spoke_store()
