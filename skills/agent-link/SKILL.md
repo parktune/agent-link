@@ -25,7 +25,10 @@ Call `whoami`.
 
 ## 2. Send a message
 
-1. Work out the target from the user's words. Call `list_agents` (with a filter if helpful) and map the description ("the project-head Claude session on gpu-server 1") to exactly one ID. If none or several match, show the candidates and ask. Never guess.
+1. Work out the target from the user's words. Call `list_agents` (with a filter if helpful) and map the description ("the project-head Claude session on gpu-server 1") to exactly one ID.
+   - Pick only a session whose name matches exactly. A session with a similar name, or the same name on another host, is a different session: never send to it as a substitute.
+   - If no registered session matches and this is Claude Code with the `ListAgents` and `SendMessage` tools, check `ListAgents`: it lists the Claude sessions on this machine, including ones not registered with agent-link. If exactly one matches, send with `SendMessage` instead and say so in one line. That route does not keep a mailbox copy and does not reach a closed session.
+   - If nothing matches, or several do, show the candidates and ask the user. Never guess.
 2. Call `send_message(to=<ID>, content=<message>)`. Write the content as a clear, self-contained request: the receiver has none of this conversation. Write normal sentences with normal spacing and punctuation, in the language the user is using; keep it short by saying less, not by squeezing words together or dropping spaces, because the receiver and the user both have to read it. Never include secrets, tokens or credentials.
 3. Report the `message_id` and status in one line, then continue with your work. Do not wait for the answer; it arrives later.
    - `delivered`: pushed into the open session.
