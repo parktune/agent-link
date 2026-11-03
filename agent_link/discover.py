@@ -1,4 +1,5 @@
-"""`agent-link hub discover`: pick servers from ~/.ssh/config in a checklist (Space to pick, Enter to apply)."""
+"""`agent-link hub discover`: a checklist of ~/.ssh/config hosts. Space picks a new server or marks a registered
+one for removal; Enter applies both."""
 import glob
 import locale
 import os
@@ -55,7 +56,7 @@ class Picker:
 
     def __init__(self, hosts, registered):
         self.hosts, self.registered = hosts, set(registered)
-        self.cursor, self.selected = 0, set()
+        self.cursor, self.selected, self.removed = 0, set(), set()
 
     def move(self, step):
         if self.hosts:
@@ -66,26 +67,38 @@ class Picker:
             return
         alias = self.hosts[self.cursor]['alias']
         if alias in self.registered:
-            return
-        self.selected ^= {alias}
+            self.removed ^= {alias}
+        else:
+            self.selected ^= {alias}
 
     def chosen(self):
         return [h['alias'] for h in self.hosts if h['alias'] in self.selected]
 
+    def removing(self):
+        return [h['alias'] for h in self.hosts if h['alias'] in self.removed]
+
+    def title(self):
+        title = f'연결할 서버를 고르세요 (추가 {len(self.selected)}개'
+        return title + (f', 해제 {len(self.removed)}개)' if self.removed else ')')
+
     def lines(self):
         for index, host in enumerate(self.hosts):
             alias = host['alias']
-            mark = '[=]' if alias in self.registered else '[x]' if alias in self.selected else '[ ]'
-            note = '  (등록됨)' if alias in self.registered else ''
+            if alias in self.removed:
+                mark, note = '[-]', '  (해제 예정)'
+            elif alias in self.registered:
+                mark, note = '[=]', '  (등록됨)'
+            else:
+                mark, note = '[x]' if alias in self.selected else '[ ]', ''
             target = f'  {host["hostname"]}' if host['hostname'] and host['hostname'] != alias else ''
             yield index == self.cursor, f'{mark} {alias}{target}{note}'
 
 
-HELP = '↑↓/j k 이동   Space 선택   Enter 완료   q 취소'
+HELP = '↑↓/j k 이동   Space 선택·해제   Enter 완료   q 취소'
 
 
 def pick(hosts, registered):
-    """Run the checklist. Returns the chosen aliases, or None when cancelled."""
+    """Run the checklist. Returns (aliases to add, registered aliases to remove), or None when cancelled."""
     import curses
     locale.setlocale(locale.LC_ALL, '')
     picker = Picker(hosts, registered)
@@ -99,7 +112,7 @@ def pick(hosts, registered):
             rows = max(1, height - 4)
             top = min(max(top, picker.cursor - rows + 1), picker.cursor)
             screen.erase()
-            screen.addnstr(0, 0, f'연결할 서버를 고르세요 ({len(picker.selected)}개 선택)', width - 1, curses.A_BOLD)
+            screen.addnstr(0, 0, picker.title(), width - 1, curses.A_BOLD)
             screen.addnstr(1, 0, HELP, width - 1)
             for row, (current, text) in enumerate(list(picker.lines())[top:top + rows]):
                 screen.addnstr(row + 3, 0, ('> ' if current else '  ') + text, width - 1,
@@ -113,7 +126,7 @@ def pick(hosts, registered):
             elif key == ord(' '):
                 picker.toggle()
             elif key in (curses.KEY_ENTER, 10, 13):
-                return picker.chosen()
+                return picker.chosen(), picker.removing()
             elif key == ord('q'):  # not ESC: it also starts arrow-key sequences
                 return None
 

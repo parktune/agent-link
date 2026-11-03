@@ -19,7 +19,7 @@ git clone https://github.com/parktune/agent-link.git && cd agent-link && ./setup
 
 `agent-link hub discover`는 `~/.ssh/config`의 `Host` 항목을 체크리스트로 보여 준다. `Include`된 파일도 읽고, `*`·`?`·`!` 패턴과 `Match` 블록은 제외한다.
 ↑↓(j/k)로 이동하고 Space로 고르고 Enter로 확정한다. `q`는 아무것도 바꾸지 않고 끝낸다.
-이미 등록된 서버는 고를 수 없다. 확정하면 고른 서버마다 아래 `add-host`를 실행하고 결과를 요약한다. 터미널이 없으면 `--hosts a,b`로 지정한다.
+이미 등록된 서버(`[=]`)에서 Space를 누르면 `[-] (해제 예정)`이 된다. 확정하면 해제할 서버가 있을 때 한 번 더 묻고, 해제할 서버마다 3절의 폐기를 양쪽 모두 처리한 뒤(서버에 SSH가 안 되면 hub 쪽만 지우고 알린다), 고른 서버마다 아래 `add-host`를 실행하고 결과를 요약한다. 터미널이 없으면 `--hosts a,b`로 추가할 서버를 지정한다.
 
 사전 조건은 다음과 같다. agent-link가 대신 만들지 않는다.
 - `~/.ssh/config`에 alias가 있다(ProxyJump 포함 가능).
@@ -63,7 +63,7 @@ agent-link hub remove-host gpu-server-1     # 로컬 PC: 토큰 삭제
 agent-link revoke                    # 서버: 토큰 해시 삭제, 현재 연결 끊기
 ```
 
-양쪽 모두 처리해야 완전히 폐기된다. SSH 키는 따로 관리한다. 인증 실패가 자동 재등록을 일으키지 않는다.
+양쪽 모두 처리해야 완전히 폐기된다. `discover` 체크리스트에서 해제하면 hub가 SSH로 서버의 `revoke`까지 실행한다. SSH 키는 따로 관리한다. 인증 실패가 자동 재등록을 일으키지 않는다.
 
 ## 4. 설정 (`~/.local/state/agent-link/config.toml`)
 

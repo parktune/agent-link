@@ -23,6 +23,7 @@ agent-link hub discover
 **호스트 목록의 출처**
 `~/.ssh/config`에 적어 둔 `Host` 항목(alias)을 체크리스트로 보여 줍니다. `Include`된 파일도 읽고, `*` 같은 패턴 항목은 뺍니다.
 - 연결할 서버를 ↑↓로 고르고 Space로 선택한 뒤 Enter로 확정합니다. `q`는 아무것도 바꾸지 않고 끝냅니다. 이미 연결된 서버는 `(등록됨)`으로 표시됩니다.
+- 연결을 끊을 서버는 `(등록됨)` 서버에서 Space를 눌러 `(해제 예정)`으로 바꾸고 Enter를 누릅니다. 한 번 더 확인한 뒤 hub에서 지우고 그 서버의 토큰도 SSH로 지웁니다.
 - 접속에는 그 alias에 적힌 `HostName`, `User`, `IdentityFile`, `ProxyJump`가 그대로 쓰입니다. agent-link가 따로 주소나 계정을 묻지 않습니다.
 - 서버 이름(세션 ID의 앞부분)은 alias가 됩니다. 예를 들어 `Host gpu-server-1`이면 `gpu-server-1:claude:<세션>`입니다.
 

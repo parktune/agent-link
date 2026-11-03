@@ -16,7 +16,7 @@ import time
 from .box import REPO_ROOT, Box, Stopped, default_box_root, read_unread, wait_for_mail, watch_enabled
 from .client import SpokeClient
 from .endpoint import relay
-from .hub import CONNECT_TIMEOUT, Hub, HubStore, SSHTransport, close_process, handshake, hub_identity
+from .hub import CONNECT_TIMEOUT, Hub, HubStore, SSHTransport, close_process, handshake, hub_identity, transport_for
 from .protocol import NAME, PROTOCOL_VERSION, ProtocolError, check_name
 from . import service
 from .spoke import Spoke, SpokeStore
@@ -197,10 +197,51 @@ def add_host_args(alias, ssh_config=None):
                               ssh_config=ssh_config)
 
 
+def remote_revoke(record):
+    """Run `agent-link revoke` on the server over SSH. Returns None on success, else why it failed."""
+    argv = transport_for(record).argv()
+    argv[-1] = shlex.join([record['remote_path'], 'revoke'])
+    try:
+        result = subprocess.run(argv, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return 'SSH timed out'
+    if result.returncode:
+        return explain_ssh_failure(result.stderr)
+    try:
+        json.loads(result.stdout)['revoked_tokens']
+    except (ValueError, KeyError, TypeError):
+        return 'unexpected output (a forced command in authorized_keys?)'
+    return None
+
+
+def unpair_host(store, record):
+    """Forget the server on the hub first (so the link stays down), then delete the hub token on the server."""
+    store.remove_host(record['name'])
+    try:
+        asyncio.run(ask(default_socket(), 'reload'))
+    except SystemExit:
+        pass
+    failure = remote_revoke(record)
+    if failure:
+        say(f'removed from the hub; revoke on {record["alias"]} failed: {failure}\n'
+            f'  run `agent-link revoke` on {record["alias"]} yourself.')
+        return 'removed (server revoke failed)'
+    say('removed from the hub and revoked on the server')
+    return 'removed'
+
+
+def confirm(question):
+    try:
+        return input(f'{question} [y/N] ').strip().lower() in ('y', 'yes')
+    except EOFError:
+        return False
+
+
 def discover_hosts(args, store):
     from .discover import pick, ssh_hosts
     hosts = ssh_hosts(args.ssh_config)
-    registered = {record['alias'] for record in store.hosts()}
+    records = {record['alias']: record for record in store.hosts()}
+    registered, removing = set(records), []
     if args.hosts:
         known = {h['alias'] for h in hosts}
         chosen = [a.strip() for a in args.hosts.split(',') if a.strip()]
@@ -213,14 +254,21 @@ def discover_hosts(args, store):
             raise SystemExit('No Host entries found in ' + (args.ssh_config or '~/.ssh/config'))
         if not sys.stdin.isatty() or not sys.stdout.isatty():
             raise SystemExit('discover needs a terminal; use --hosts alias1,alias2 instead')
-        chosen = pick(hosts, registered)
-        if chosen is None:
+        picked = pick(hosts, registered)
+        if picked is None:
             say('Cancelled. Nothing was changed.')
             return 0
-    if not chosen:
-        say('No new servers selected.')
+        chosen, removing = picked
+    if not chosen and not removing:
+        say('Nothing selected. Nothing was changed.')
+        return 0
+    if removing and not confirm(f'Disconnect {", ".join(removing)}? Sessions there can no longer be reached.'):
+        say('Cancelled. Nothing was changed.')
         return 0
     results = {}
+    for alias in removing:
+        say(f'\n=== {alias} (remove) ===')
+        results[alias] = unpair_host(store, records[alias])
     for alias in chosen:
         say(f'\n=== {alias} ===')
         try:
@@ -232,7 +280,7 @@ def discover_hosts(args, store):
     say('\nSummary:')
     for alias, outcome in results.items():
         say(f'  {alias}: {outcome}')
-    return 0 if all(v == 'connected' for v in results.values()) else 1
+    return 0 if all(v in ('connected', 'removed') for v in results.values()) else 1
 
 
 def run_hub(args):
@@ -560,7 +608,7 @@ def build_parser():
     add.add_argument('--remote-socket', help='Daemon socket on the server, if not the default')
     add.add_argument('--admin-alias', help='SSH alias with shell access used only to issue the invitation')
     add.add_argument('--ssh-config')
-    discover = hub.add_parser('discover', help='Pick servers from ~/.ssh/config (Space to pick, Enter to apply)')
+    discover = hub.add_parser('discover', help='Pick servers from ~/.ssh/config to add or remove (Space, then Enter)')
     discover.add_argument('--ssh-config', help='SSH config to read (default ~/.ssh/config)')
     discover.add_argument('--hosts', help='Comma-separated aliases instead of the interactive picker')
     hub.add_parser('remove-host').add_argument('host')
