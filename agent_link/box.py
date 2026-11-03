@@ -52,20 +52,27 @@ class Box:
 
     def unread(self, agent, limit=20):
         """Return unread messages oldest first and move them to received/read/."""
-        folder = self.folder(agent)
-        if not folder.is_dir():
-            return []
-        messages = []
-        for path in sorted(folder.glob('*.md'))[:limit]:
-            messages.append({**parse(path.read_text()), 'file': str(path)})
-            target = _private(folder / 'read') / path.name
-            os.replace(path, target)
-            messages[-1]['file'] = str(target)
-        return messages
+        return read_unread(self.folder(agent), limit)
 
     def count(self, agent):
         folder = self.folder(agent)
         return len(list(folder.glob('*.md'))) if folder.is_dir() else 0
+
+
+def read_unread(folder, limit=20, keep=lambda message: False):
+    """Unread messages of a received/ folder, oldest first, moved to received/read/ unless `keep(message)`."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        return []
+    messages = []
+    for path in sorted(folder.glob('*.md'))[:limit]:
+        message = {**parse(path.read_text()), 'file': str(path)}
+        if not keep(message):
+            target = _private(folder / 'read') / path.name
+            os.replace(path, target)
+            message['file'] = str(target)
+        messages.append(message)
+    return messages
 
 
 class Stopped(Exception):

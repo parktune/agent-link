@@ -77,7 +77,7 @@ $agent-link trainer 체크포인트 경로 알려줘
 | Codex | `agent-link codex resume`으로 열면 `codex queue`로 그 대화에 넣음. 안 되면 박스에 쌓이고 `$agent-link`로 확인 |
 | 닫혀 있는 세션 | 박스에 저장, 다음에 열었을 때 확인 |
 
-Channels가 막힌 Claude 세션은 hook이 깨웁니다. Claude Code가 세션 시작과 매 턴 끝에 `agent-link wait-box --hook`을 백그라운드로 띄우고, 새 메일이 오면 그 hook이 끝나면서 세션이 깨어납니다. agent-link에 박스로 등록된 세션이 아니면 hook은 바로 끝납니다. 같은 메일로 두 번 깨우지 않습니다.
+Channels가 막힌 Claude 세션은 hook이 깨웁니다. Claude Code가 세션 시작과 매 턴 끝에 `agent-link wait-box --hook`을 백그라운드로 띄우고, 새 메일이 오면 그 hook이 메시지 내용을 담아 끝나면서 세션이 깨어나고, 세션은 메시지마다 `from <보낸 세션> (<종류>): <내용>` 한 줄을 대화에 보여 줍니다. agent-link에 박스로 등록된 세션이 아니면 hook은 바로 끝납니다. 같은 메일로 두 번 깨우지 않습니다.
 
 박스는 로컬 PC `<repo>/hub/<tool>-<name>/received/`, 서버 `<repo>/spoke/<tool>-<name>/received/`에 메시지 1건당 Markdown 파일 1개로 쌓입니다.
 

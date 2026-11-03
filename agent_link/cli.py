@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-from .box import REPO_ROOT, Box, Stopped, default_box_root, wait_for_mail, watch_enabled
+from .box import REPO_ROOT, Box, Stopped, default_box_root, read_unread, wait_for_mail, watch_enabled
 from .client import SpokeClient
 from .endpoint import relay
 from .hub import CONNECT_TIMEOUT, Hub, HubStore, SSHTransport, close_process, handshake, hub_identity
@@ -384,14 +384,38 @@ def claude_hook_watch(socket_path=None, wait_registration=60, interval=2.0):
     if not watch_enabled(box):
         return 0
     try:
-        count, other = wait_for_mail(box, interval, new_only=True)
+        _, other = wait_for_mail(box, interval, new_only=True)
     except Stopped:
         return 0
     if other:
         return 0
-    print(f'agent-link: {count} unread message(s) in this session\'s mailbox. Read them with the agent-link '
-          'check_box tool (the agent-link skill, section 3).', file=sys.stderr, flush=True)
+    print(hook_wake_text(box), file=sys.stderr, flush=True)
     return 2
+
+
+HOOK_MESSAGES, HOOK_CHARS = 5, 4000  # what the wake-up text carries; the rest stays for check_box
+
+
+def hook_wake_text(box):
+    """The wake-up text: the new messages themselves, so the session needs no check_box call.
+
+    Up to HOOK_MESSAGES messages are moved to read/ and included in full; a longer message is cut and left
+    unread, and so are messages beyond the limit, for check_box.
+    """
+    from .inject import codex_envelope
+    messages = read_unread(box, HOOK_MESSAGES, keep=lambda m: len(m.get('content', '')) > HOOK_CHARS)
+    left = len(list(Path(box).glob('*.md')))
+    blocks = []
+    for message in messages:
+        if len(message.get('content', '')) > HOOK_CHARS:
+            message = {**message, 'content': message['content'][:HOOK_CHARS] + '\n[... cut here; the full text '
+                       'is still unread: read it with check_box]'}
+        blocks.append(codex_envelope({**message, 'in_reply_to': message.get('in_reply_to') or None}))
+    head = (f'agent-link: {len(messages)} new message(s) for this session' +
+            (f'; {left} more unread in the mailbox, read them with check_box' if left else '') +
+            '. Show each to the user as one line "from <sender> (<type>): <the message, or a one-line summary '
+            'if it is long>", then handle it as the agent-link skill says (section 4).')
+    return '\n\n'.join([head, *blocks])
 
 
 def spoke_store():

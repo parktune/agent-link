@@ -229,8 +229,9 @@ class AdapterTests(Environment):
             process.stdin.close()
             _, err = await asyncio.wait_for(process.communicate(), 15)
             if process.returncode == 2:
-                self.assertIn('unread message(s)', err.decode())
+                hook.texts.append(err.decode())
             return process.returncode
+        hook.texts = []
         try:
             await until(lambda: adapter.client.connected)
             self.assertEqual(await hook('Stop', 'not-registered-session'), 0)
@@ -242,11 +243,18 @@ class AdapterTests(Environment):
             await sender.send('claude:head', 'ping')
             self.assertEqual(await asyncio.wait_for(starting, 15), 2)
 
-            again = asyncio.create_task(hook('Stop'))  # the same unread mail: no second wake
+            again = asyncio.create_task(hook('Stop'))  # nothing new: no second wake
             await until(lambda: adapter.whoami()['watch']['running_pid'] is not None)
             self.assertFalse(again.done())
             await sender.send('claude:head', 'pong')
             self.assertEqual(await asyncio.wait_for(again, 15), 2)
+            first, second = hook.texts
+            self.assertIn('1 new message(s) for this session', first)
+            self.assertIn('[agent-link] request from gpu1:claude:alpha', first)
+            self.assertIn('--- BEGIN MESSAGE ---\nping\n--- END MESSAGE ---', first)
+            self.assertIn('pong', second)
+            self.assertNotIn('ping', second)  # carried once, then moved to read/
+            self.assertEqual((await adapter.call('check_box', {}))['messages'], [])
 
             adapter.set_watch(False)
             self.assertEqual(await hook('Stop'), 0)  # watch off: ends at once
@@ -310,6 +318,25 @@ class WaitForMailTests(unittest.TestCase):
 
 
 class ClaudeHookTests(unittest.TestCase):
+    def test_wake_text_carries_short_messages_and_leaves_long_ones_and_the_rest_unread(self):
+        from agent_link.box import Box
+        from agent_link import cli
+        with tempfile.TemporaryDirectory() as root:
+            box = Box(root)
+            for n in range(cli.HOOK_MESSAGES + 1):
+                content = 'x' * (cli.HOOK_CHARS + 10) if n == 1 else f'note {n}'
+                box.put({**make_message('gpu1:claude:alpha', 'gpu1:claude:head', content),
+                         'created_at': f'2026-11-03T10:00:0{n}Z'})
+            folder = box.folder('gpu1:claude:head')
+            text = cli.hook_wake_text(folder)
+            self.assertIn(f'{cli.HOOK_MESSAGES} new message(s) for this session; 2 more unread', text)
+            self.assertIn('note 0', text)
+            self.assertNotIn(f'note {cli.HOOK_MESSAGES}', text)
+            self.assertIn('[... cut here; the full text is still unread', text)
+            self.assertEqual(len(list(folder.glob('*.md'))), 2)  # the long one and the one past the limit
+            self.assertEqual(len(list((folder / 'read').glob('*.md'))), cli.HOOK_MESSAGES - 1)
+
+
     def test_install_keeps_other_hooks_and_replaces_its_own(self):
         from agent_link import claude_hooks
         with tempfile.TemporaryDirectory() as root:
