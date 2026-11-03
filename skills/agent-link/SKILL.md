@@ -26,7 +26,7 @@ Call `whoami`.
 ## 2. Send a message
 
 1. Work out the target from the user's words. Call `list_agents` (with a filter if helpful) and map the description ("the project-head Claude session on gpu-server 1") to exactly one ID. If none or several match, show the candidates and ask. Never guess.
-2. Call `send_message(to=<ID>, content=<message>)`. Write the content as a clear, self-contained request: the receiver has none of this conversation. Never include secrets, tokens or credentials.
+2. Call `send_message(to=<ID>, content=<message>)`. Write the content as a clear, self-contained request: the receiver has none of this conversation. Write normal sentences with normal spacing and punctuation, in the language the user is using; keep it short by saying less, not by squeezing words together or dropping spaces, because the receiver and the user both have to read it. Never include secrets, tokens or credentials.
 3. Report the `message_id` and status in one line, then continue with your work. Do not wait for the answer; it arrives later.
    - `delivered`: pushed into the open session.
    - `stored` / `stored_offline`: saved to the receiver's mailbox (it was not reachable live, or is closed).
