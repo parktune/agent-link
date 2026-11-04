@@ -592,7 +592,7 @@ def build_parser():
     commands.add_parser('endpoint', help='Server: SSH forced command the hub runs').add_argument('--socket', type=Path)
     commands.add_parser('revoke', help='Server: delete the hub peer token and drop the hub connection')
     unregister = commands.add_parser('unregister', help='Unregister a session, on whatever host it lives')
-    unregister.add_argument('session', help='Its name, tool:name (when a Claude and a Codex session share it) or the full host:tool:name ID')
+    unregister.add_argument('session', help='Its name, tool:name or full host:tool:name ID (e.g. local:claude:main); refused with the candidates when several match')
     update = commands.add_parser('update', help='git pull + setup.sh + restart here; on the hub PC also every server')
     update.add_argument('--hosts', help='On the hub PC: only these servers (comma-separated names or aliases)')
     update.add_argument('--local-only', action='store_true', help='Only this machine, not the servers')
@@ -959,11 +959,12 @@ def check_new_name(tool, name, sessions):
         raise SystemExit(f'a {tool} session named "{name}" already exists; open it with '
                          f'`agent-link {tool} resume {name}`')
     if service.alive():
-        try:
-            agents = asyncio.run(ask(default_socket(), 'list')).get('agents', [])
+        try:  # only this machine counts: another host may use the same name
+            info = asyncio.run(ask(default_socket(), 'status'))
+            here, agents = info.get('host'), asyncio.run(ask(default_socket(), 'list')).get('agents', [])
         except (SystemExit, ProtocolError):
-            agents = []
-        taken = [a['id'] for a in agents if a.get('tool') == tool and a.get('name') == name]
+            here, agents = None, []
+        taken = [a['id'] for a in agents if a.get('tool') == tool and a.get('name') == name and a.get('host') == here]
         if taken:
             raise SystemExit(f'"{name}" is already registered by {taken[0]}; open it with '
                              f'`agent-link {tool} resume {name}`, or pick another name')

@@ -176,6 +176,11 @@ class SpokeStore:
         return {'items': count, 'bytes': size}
 
 
+def ambiguous(target, ids):
+    return ProtocolError('ambiguous', f'{target} matches {len(ids)} sessions: {", ".join(sorted(ids))}. '
+                                      f'Use the full ID (host:tool:name) of the one you mean')
+
+
 @dataclass
 class Agent:
     id: str
@@ -374,9 +379,10 @@ class Spoke:
         raise ProtocolError('unauthorized', f'unknown operation {op}')
 
     def check_name_free(self, tool, name, identifier, session_id, conn, continues=frozenset()):
-        """One session per name and tool, on this host and on the others the hub reported.
+        """One registration per host, tool and name: `host:tool:name` is the agent ID.
 
-        A Claude and a Codex session may share a name: `claude:<name>` and `codex:<name>` tell them apart.
+        Another host, or the other tool, may use the same name; a bare name then needs the full ID to tell
+        them apart (see `ambiguous`).
         The same session coming back (same ID, or this connection) keeps its name. A registration with this
         session's own session ID is this session even if another connection holds it (a stale or second MCP
         server of the same session): it is taken over, not refused.
@@ -395,10 +401,6 @@ class Spoke:
             state = 'open' if agent.conn else 'closed'
             raise ProtocolError('name_taken', f'"{name}" is already used by {agent.id} ({state}). Rename this session '
                                 f'(/rename), or free the name with `agent-link unregister {agent.id}`.')
-        for agent in self.others():
-            if agent.get('name') == name and agent.get('tool') == tool:
-                raise ProtocolError('name_taken', f'"{name}" is already used by {agent["id"]}. Rename this session '
-                                    f'(/rename), or free the name with `agent-link unregister {agent["id"]}` on the hub PC.')
 
     def others(self):
         """Agents on other hosts (servers learn them from the hub's directory)."""
@@ -448,18 +450,26 @@ class Spoke:
         if host not in (None, self.host):
             raise ProtocolError('not_found', f'{target} is not on this host ({self.host})')
         found = self.match(tool, name)
-        if len(found) != 1:
-            raise ProtocolError('ambiguous' if found else 'not_found',
-                                f'{len(found)} sessions match {target} on {self.host}')
+        if len(found) > 1:
+            raise ambiguous(target, [a.id for a in found])
+        if not found:
+            raise ProtocolError('not_found', f'no session {target} on {self.host}')
         return found[0].id
 
     async def remove(self, target):
-        """Remove a session by name wherever it is: here, or through the hub on another host."""
-        try:
+        """Unregister a session wherever it is. A name or tool:name is looked up on every host (through the hub,
+        which sees them all) and refused as ambiguous when it matches more than one."""
+        host, tool, name = parse_target(target)
+        if host == self.host or not isinstance(self.uplink, OutboxUplink):
             return self.remove_agent(self.resolve(target))
-        except ProtocolError as error:
-            if error.code != 'not_found' or not isinstance(self.uplink, OutboxUplink):
-                raise
+        if self.link is None and host is None:
+            # The hub is not reachable: decide with this host and the directory the hub last sent.
+            elsewhere = [a['id'] for a in self.others() if a.get('name') == name and (tool is None or a.get('tool') == tool)]
+            here = [a.id for a in self.match(tool, name)]
+            if len(here) + len(elsewhere) > 1:
+                raise ambiguous(target, here + elsewhere)
+            if here:
+                return self.remove_agent(here[0])
         return await self.uplink.remove(target)
 
     def expire(self, now=None):
@@ -554,15 +564,10 @@ class Spoke:
         is_reply = type == 'reply' and parent is not None
         host, tool, name = parse_target(to)
         if host in (None, self.host):
+            # A session on this host wins over one of the same name elsewhere.
             found = self.match(tool, name)
-            if host is None and tool is None and found:
-                # A Claude and a Codex session may share a name, here or on another host.
-                found_ids = [a.id for a in found] + [a['id'] for a in self.others() if a.get('name') == name]
-                if len(found_ids) > 1:
-                    raise ProtocolError('ambiguous', f'{", ".join(found_ids)} are all named {name}; '
-                                                     f'use claude:{name} or codex:{name}')
             if len(found) > 1:
-                raise ProtocolError('ambiguous', f'{len(found)} local sessions are named {name}; use tool:name')
+                raise ambiguous(to, [a.id for a in found])
             if found:
                 self.authorize(is_reply, 'host')
                 message['to'] = found[0].id

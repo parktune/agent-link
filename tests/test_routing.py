@@ -409,28 +409,47 @@ class RemoveTests(Environment):
         with self.assertRaisesRegex(Exception, 'name_taken'):
             await self.session('gpu1', 'claude', 'head', session_id='another-session')
         await self.session('gpu1', 'codex', 'head')  # another tool may share the name
-        with self.assertRaisesRegex(Exception, 'ambiguous.*claude:head or codex:head'):
+        with self.assertRaisesRegex(Exception, 'ambiguous.*gpu1:claude:head, gpu1:codex:head.*full ID'):
             await a.send('head', 'x')
         self.assertEqual((await a.send('codex:head', 'x'))['route'], 'local')
 
-    async def test_names_are_unique_per_tool_across_hosts_but_a_session_keeps_its_own(self):
+    async def test_the_same_tool_and_name_may_live_on_different_hosts(self):
         await self.setup_hosts()
         main = await self.session('local', 'claude', 'main')
         head = await self.session('gpu1', 'claude', 'head')
+        alpha = await self.session('gpu1', 'claude', 'alpha')
         await self.connected('gpu1')
         await self.connected('gpu2')
         await until(lambda: any(a['id'] == 'gpu1:claude:head' for a in self.spokes['gpu2'].directory))
-        with self.assertRaisesRegex(Exception, 'name_taken.*gpu1:claude:head'):
-            await self.session('gpu2', 'claude', 'head', session_id='another-session')
-        with self.assertRaisesRegex(Exception, 'name_taken'):
-            await self.session('local', 'claude', 'head', session_id='another-session')  # the hub knows every host
-        await self.session('gpu2', 'codex', 'head')  # another tool may share the name
-        await until(lambda: any(a['id'] == 'gpu2:codex:head' for a in self.hub.presence.get('gpu2', [])))
-        with self.assertRaisesRegex(Exception, 'ambiguous'):
-            await main.send('head', 'x')
-        self.assertEqual((await main.send('codex:head', 'x'))['route'], 'hub')
+        other = await self.session('gpu2', 'claude', 'head', session_id='another-session')  # another host: allowed
+        with self.assertRaisesRegex(Exception, 'name_taken'):  # host, tool and name all the same: refused
+            await self.session('gpu2', 'claude', 'head', session_id='third-session')
+        await until(lambda: any(a['id'] == 'gpu2:claude:head' for a in self.hub.presence.get('gpu2', [])))
+        with self.assertRaisesRegex(Exception, 'ambiguous.*gpu1:claude:head, gpu2:claude:head.*full ID'):
+            await main.send('head', 'x')  # none on the sender's host, two elsewhere
+        self.assertEqual((await main.send('gpu2:claude:head', 'to gpu2'))['route'], 'hub')
+        self.assertEqual((await alpha.send('claude:head', 'same host'))['route'], 'local')  # the sender's host wins
+        await until(lambda: other.received and head.received)
+        self.assertEqual(([m['content'] for m in head.received], [m['content'] for m in other.received]),
+                         (['same host'], ['to gpu2']))
         again = await head.client.request('register', tool='claude', name='head', session_id='session-head')
         self.assertEqual(again['id'], 'gpu1:claude:head')
+
+    async def test_unregister_checks_every_host_and_takes_full_ids(self):
+        await self.setup_hosts()
+        await self.session('local', 'claude', 'main')
+        await self.session('gpu1', 'claude', 'head')
+        await self.session('gpu2', 'claude', 'head')
+        await self.connected('gpu1')
+        await self.connected('gpu2')
+        await until(lambda: len([a for a in self.hub.all_agents() if a['name'] == 'head']) == 2)
+        for where in ('local', 'gpu1'):  # also from a server that has one of them
+            with self.assertRaisesRegex(Exception, 'ambiguous.*gpu1:claude:head, gpu2:claude:head'):
+                await self.ask(where, 'remove', target='head')
+        self.assertEqual((await self.ask('gpu1', 'remove', target='gpu2:claude:head'))['removed'], 'gpu2:claude:head')
+        self.assertEqual((await self.ask('gpu2', 'remove', target='local:claude:main'))['removed'], 'local:claude:main')
+        await until(lambda: len([a for a in self.hub.all_agents() if a['name'] == 'head']) == 1)
+        self.assertEqual((await self.ask('local', 'remove', target='head'))['removed'], 'gpu1:claude:head')
 
     async def test_remove_by_name_from_any_machine(self):
         await self.setup_hosts()

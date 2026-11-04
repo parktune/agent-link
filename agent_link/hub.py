@@ -11,7 +11,7 @@ import time
 from .protocol import (FRAME_LIMIT, LOCAL_HOST, PROTOCOL_VERSION, ProtocolError, encode, parse_target, read_frame,
                        validate_message)
 from .box import Box
-from .spoke import Spoke, SpokeStore, directory_entries, matches
+from .spoke import Spoke, SpokeStore, ambiguous, directory_entries, matches
 from .state import open_db
 
 CONNECT_TIMEOUT = 5
@@ -437,8 +437,7 @@ class Hub:
             found = [a for a in self.all_agents() if a['name'] == name and (tool is None or a['tool'] == tool)
                      and a['host'] != origin]
             if len(found) > 1:
-                raise ProtocolError('ambiguous', f'{", ".join(a["id"] for a in found)} are all named {name}; '
-                                                 f'use claude:{name} or codex:{name}')
+                raise ambiguous(message['to'], [a['id'] for a in found])
             if not found:
                 raise ProtocolError('not_found', f'no session named {message["to"]}')
             host, message = found[0]['host'], {**message, 'to': found[0]['id']}
@@ -472,8 +471,10 @@ class Hub:
         host, tool, name = parse_target(target)
         found = [a for a in self.all_agents() if a['name'] == name and (tool is None or a['tool'] == tool)
                  and (host is None or a['host'] == host)]
-        if len(found) != 1:
-            raise ProtocolError('ambiguous' if found else 'not_found', f'{len(found)} sessions match {target}')
+        if len(found) > 1:
+            raise ambiguous(target, [a['id'] for a in found])
+        if not found:
+            raise ProtocolError('not_found', f'no session {target} is registered')
         agent = found[0]
         if agent['host'] == LOCAL_HOST:
             return self.local.remove_agent(agent['id'])
