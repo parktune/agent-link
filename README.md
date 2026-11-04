@@ -52,11 +52,12 @@ agent-link status          # 어디서든: PC면 hub와 서버 연결, 서버면
 
 | 할 일 | 명령 |
 |---|---|
-| 세션을 열면서 등록 | `agent-link claude resume <세션 이름>` · `agent-link codex resume <세션 이름>` |
+| 새 세션을 만들면서 등록 | `agent-link claude register <새 이름>` · `agent-link codex register <새 이름>` |
+| 기존 세션을 열면서 등록 | `agent-link claude resume <세션 이름>` · `agent-link codex resume <세션 이름>` |
 | 메시지 보내기 | Claude `/agent-link <세션> <내용>` · Codex `$agent-link <세션> <내용>` |
 | 받은 메시지 확인 | `/agent-link` (내용 없이) |
 | 이 세션 설정 | `/agent-link` 뒤에 말로: 이름 바꾸기, 등록 철회, 박스 감시 켜기·끄기 |
-| 등록 지우기 | `agent-link remove <세션 이름>` (어느 머신에서 실행해도 됨) |
+| 등록 해제 | `agent-link unregister <세션 이름>` (어느 머신에서 실행해도 됨) |
 
 ```
 agent-link claude resume project-head
@@ -64,8 +65,10 @@ agent-link claude resume project-head
 $agent-link trainer 체크포인트 경로 알려줘
 ```
 
-- **세션 이름:** `/rename`으로 붙인 이름을 씁니다. 같은 종류(Claude끼리, Codex끼리) 안에서는 모든 머신을 통틀어 하나뿐이어야 하고, 겹치면 등록이 거부됩니다. Claude 세션과 Codex 세션은 같은 이름을 쓸 수 있고, 이때 보낼 때 "codex trainer 세션에게"처럼 종류도 말하면 됩니다(종류 없이 이름만 주면 세션이 어느 쪽인지 묻습니다). 닫혀 있는 옛 세션이 이름을 쥐고 있으면 `agent-link remove <이름>`(종류가 둘이면 `claude:<이름>`)으로 지웁니다.
-- **이름 바꾸기:** 등록은 이름이 아니라 세션 ID로 추적합니다. 열린 세션에서 `/rename`하면 몇 초 안에 등록이 새 이름으로 옮겨지고, 박스의 메시지도 따라갑니다. 옛 이름으로는 더 이상 받지 않습니다. 새 이름이 이미 쓰이고 있으면 옛 이름을 유지합니다. 14일 동안 열리지 않은 세션의 등록은 자동으로 지워지고, 다시 열면 다시 등록됩니다.
+- **세션 이름:** `/rename`으로 붙인 이름을 씁니다. 같은 종류(Claude끼리, Codex끼리) 안에서는 모든 머신을 통틀어 하나뿐이어야 하고, 겹치면 등록이 거부됩니다. Claude 세션과 Codex 세션은 같은 이름을 쓸 수 있고, 이때 보낼 때 "codex trainer 세션에게"처럼 종류도 말하면 됩니다(종류 없이 이름만 주면 세션이 어느 쪽인지 묻습니다). 닫혀 있는 옛 세션이 이름을 쥐고 있으면 `agent-link unregister <이름>`(종류가 둘이면 `claude:<이름>`)으로 해제합니다.
+- **이름 바꾸기:** 등록은 이름이 아니라 세션 ID로 추적합니다. 열린 세션에서 `/rename`하면 몇 초 안에 등록이 새 이름으로 옮겨지고, 박스의 메시지도 따라갑니다. 옛 이름으로는 더 이상 받지 않습니다. 새 이름이 이미 쓰이고 있으면 옛 이름을 유지합니다.
+- **`register`:** 그 이름으로 새 세션을 만들어 열고 바로 등록합니다. Codex 세션은 Codex app-server(`codex queue`가 쓰는 백그라운드 서비스)로 이름 붙은 세션을 만든 뒤 엽니다. 같은 종류의 세션이 이미 그 이름을 쓰고 있으면 거부하고 `resume`을 안내합니다.
+- **자동 해제:** 닫힌 세션은 15일 동안 열리지 않았거나, 15일 동안 메시지를 보내거나 받지 않았으면 등록이 해제됩니다. 열려 있는 세션은 해제하지 않습니다. 해제된 세션은 기록이 남지 않으므로, 다시 쓰려면 `register`·`resume`으로 열거나 세션에서 `/agent-link`로 직접 등록합니다.
 - **`resume` 옵션:** 이름 대신 세션 ID도 됩니다. `resume`만 쓰면 고르기 화면, `continue`(Codex는 `last`)는 지금 폴더의 최근 대화입니다. CLI에 넘길 인자는 `--` 뒤에 씁니다(`agent-link claude resume project-head -- --model opus`).
 - **비동기:** 보낸 세션은 기다리지 않고 하던 일을 계속하며, 회신은 나중에 도착합니다. 서버 세션도 다른 머신의 세션을 이름으로 부를 수 있습니다.
 - **무한 핑퐁 방지:** 회신에 다시 회신하는 것은 거부됩니다.

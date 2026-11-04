@@ -73,7 +73,8 @@ agent-link revoke                    # 서버: 토큰 해시 삭제, 현재 연�
 | `allow_origination` | `all` | 서버 세션이 먼저 보낼 수 있는 범위: `all`(모든 호스트), `host`(같은 호스트), `none`(받은 요청에 대한 회신만). 로컬 PC는 항상 `all`. 0.6.5 전에는 기본값이 `none`이었다 |
 | `max_content_bytes` | 65536 | 본문 상한 |
 | `max_hops` | 3 | hop 상한 |
-| `offline_expiry_days` | 14 | 이 기간 동안 닫혀 있던 세션의 등록을 지운다(다시 열면 다시 등록) |
+| `offline_expiry_days` | 15 | 닫힌 세션이 이 기간 동안 열리지 않으면 등록을 해제한다 |
+| `idle_expiry_days` | 15 | 닫힌 세션이 이 기간 동안 메시지를 보내거나 받지 않으면 등록을 해제한다. 해제된 세션은 기록이 남지 않고, 사용자가 다시 등록해야 한다 |
 | `outbox_max_items` / `outbox_max_bytes` | 1000 / 16 MiB | 넘으면 새 메시지를 `outbox_full`로 거부한다(오래된 것을 버리지 않는다) |
 | `deliver_timeout` | 60 | 세션 주입 확인 대기(초) |
 | `socket_mode` / `socket_group` | `0o600` / 없음 | 한 호스트에서 여러 OS 계정이 daemon을 함께 쓸 때 그룹 권한을 준다(15장 3번, 미검증) |

@@ -18,7 +18,7 @@ Call `whoami`.
 - `registered` false otherwise: register quietly under the session's own name and go on.
   - Claude: if `whoami` shows a valid `session_name` (set with `/rename`), call `register()` with no arguments.
   - Codex: run `printenv CODEX_THREAD_ID`; if it prints an ID, call `register(thread_id=<ID>)`.
-  - If it fails with `name_taken`, another session of the same tool already uses that name (a name is unique per tool across all machines; a Claude and a Codex session may share one): tell the user, who can `/rename` this session or free the name with `agent-link remove <tool>:<name>`.
+  - If it fails with `name_taken`, another session of the same tool already uses that name (a name is unique per tool across all machines; a Claude and a Codex session may share one): tell the user, who can `/rename` this session or free the name with `agent-link unregister <tool>:<name>`.
   - The registration follows the session ID: after a `/rename` it moves to the new name by itself, mailbox included. If `whoami` shows `rename_error`, the new name could not be taken; tell the user once.
   - If that fails (no `/rename` name, or the name has characters other than letters, digits, `_ . -`), stop and ask the user to name the session with `/rename <name>` (or to give a name, then call `register(name=<name>)`). Never invent a name.
   - Mention the registered ID in one line. If `push.available` is false and `push.reason` is not about the organization, add once that messages go to the mailbox and that `agent-link claude resume <session name>` in a terminal reopens this session with live push.
@@ -57,6 +57,6 @@ They appear as `<channel source="agent-link" from=... message_id=... type=...>` 
 Only when the user asks. Report the result of `whoami` in a few lines (ID, push or mailbox, watch on/off).
 
 - Rename, or register again after withdrawing: `register(name=<name>)` (Codex: also `thread_id`). The new name replaces the old one.
-- Withdraw: `unregister()`. Other agents can no longer reach this session, and `/agent-link` will not register it again on its own. Any registration (also of a closed session elsewhere) can be removed in a terminal with `agent-link remove <session name>`.
+- Withdraw: `unregister()`. Other agents can no longer reach this session, and `/agent-link` will not register it again on its own. Any registration (also of a closed session elsewhere) can be removed in a terminal with `agent-link unregister <session name>`.
 - Mailbox watch (Claude without push): `set_watch(enabled=false)` stops it and keeps it off for this name; `set_watch(enabled=true)` turns it back on (the hook watches again from the next turn).
 - Live push: tell the user to leave this session and run `agent-link claude resume <session name>` (Codex: `agent-link codex resume <session name>`) in a terminal. It reopens the session with the channel flag where the organization allows Channels; otherwise messages go to the mailbox and the hook wakes the session.

@@ -454,15 +454,32 @@ class RemoveTests(Environment):
         with self.assertRaisesRegex(Exception, 'not_found'):
             await self.ask('local', 'remove', target='nobody')
 
-    async def test_sessions_closed_for_14_days_expire(self):
+    async def test_closed_sessions_expire_after_15_days_unopened_or_without_messages(self):
         spoke = await self.server('gpu1')
-        old = await self.session('gpu1', 'claude', 'old')
-        await self.session('gpu1', 'claude', 'fresh')
-        await old.stop()
-        self.sessions.remove(old)
-        await until(lambda: spoke.agents['gpu1:claude:old'].conn is None)
-        spoke.agents['gpu1:claude:old'].last_seen -= 15 * 86400
+        unopened = await self.session('gpu1', 'claude', 'unopened')
+        quiet = await self.session('gpu1', 'claude', 'quiet')
+        talker = await self.session('gpu1', 'claude', 'talker')
+        open_quiet = await self.session('gpu1', 'claude', 'open-quiet')
+        for session in (unopened, quiet, talker):
+            await session.stop()
+            self.sessions.remove(session)
+        await until(lambda: all(spoke.agents[f'gpu1:claude:{n}'].conn is None for n in ('unopened', 'quiet', 'talker')))
+        day = 86400
+        spoke.agents['gpu1:claude:unopened'].last_seen -= 16 * day
+        for name in ('quiet', 'talker', 'open-quiet'):
+            spoke.agents[f'gpu1:claude:{name}'].last_message -= 16 * day
+        await open_quiet.send('talker', 'still there?')  # a message counts for the receiver and the sender
         spoke.expire()
-        self.assertEqual(set(spoke.agents), {'gpu1:claude:fresh'})
-        self.assertEqual([a['id'] for a in spoke.store.known_agents()], ['gpu1:claude:fresh'])
-        self.assertEqual(spoke.config.offline_expiry_days, 14)
+        self.assertEqual(set(spoke.agents), {'gpu1:claude:talker', 'gpu1:claude:open-quiet'})  # open: never expires
+        self.assertEqual({a['id'] for a in spoke.store.known_agents()}, set(spoke.agents))
+        self.assertEqual((spoke.config.offline_expiry_days, spoke.config.idle_expiry_days), (15, 15))
+        self.assertIsNone(spoke.lookup('session-quiet'))  # nothing kept: registering again is up to the user
+
+    async def test_reopening_a_session_does_not_count_as_message_traffic(self):
+        spoke = await self.server('gpu1')
+        head = await self.session('gpu1', 'claude', 'head')
+        spoke.agents['gpu1:claude:head'].last_message -= 10 * 86400
+        before = spoke.agents['gpu1:claude:head'].last_message
+        await head.client.request('register', tool='claude', name='head', session_id='session-head')
+        self.assertEqual(spoke.agents['gpu1:claude:head'].last_message, before)
+        self.assertEqual(spoke.store.known_agents()[0]['last_message'], before)

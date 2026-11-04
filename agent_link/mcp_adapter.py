@@ -232,7 +232,7 @@ class Adapter:
         return self.whoami()
 
     def withdrawn_by_daemon(self, reason):
-        """`agent-link remove` (or expiry) dropped this session's registration: do not register it again here."""
+        """`agent-link unregister` (or expiry) dropped this session's registration: do not register it again here."""
         self.registration = self.identity = None
         self.withdrawn = True
 
