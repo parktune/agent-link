@@ -849,14 +849,22 @@ def open_claude(action=None, target=None, extra=()):
     latest conversation) or None (a new session).
     """
     from .inject import claude_channel_policy
-    from .sessions import find_claude_sessions
+    from .sessions import claude_background_sessions, find_claude_sessions
     if not shutil.which('claude'):
         raise SystemExit('claude (Claude Code) is not on PATH')
     picker = action == 'resume' and not target
     if action == 'continue':
         mode = ['--continue']
     elif action == 'resume' and target:
-        mode = ['--resume', pick_session(find_claude_sessions(target), 'Claude', target)['id']]
+        session = pick_session(find_claude_sessions(target), 'Claude', target)
+        if session.get('continued_from'):
+            say_err(f'{session["continued_from"]} was continued in {session["id"]} (Claude Code gives a session a new ID '
+                    f'when it goes to the background); opening {session["id"]}')
+        if session['id'] in claude_background_sessions():
+            raise SystemExit(f'"{target}" ({session["id"]}) is running in the background; opening it here would make '
+                             f'another copy. Use `claude attach {session["id"]}`, or `claude stop {session["id"]}` '
+                             f'and run this again.')
+        mode = ['--resume', session['id']]
     else:
         mode = ['--resume'] if picker else []
     blocked = claude_channel_policy()
