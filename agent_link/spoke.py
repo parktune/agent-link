@@ -366,13 +366,14 @@ class Spoke:
             return {'op': 'ok'}
         raise ProtocolError('unauthorized', f'unknown operation {op}')
 
-    def check_name_free(self, name, identifier, session_id, conn):
-        """One session per name, Claude or Codex alike, on this host and on the others the hub reported.
+    def check_name_free(self, tool, name, identifier, session_id, conn):
+        """One session per name and tool, on this host and on the others the hub reported.
 
+        A Claude and a Codex session may share a name: `claude:<name>` and `codex:<name>` tell them apart.
         The same session coming back (same ID, or this connection) keeps its name.
         """
         for agent in self.agents.values():
-            if agent.name != name or agent.conn is conn and conn is not None:
+            if agent.name != name or agent.tool != tool or agent.conn is conn and conn is not None:
                 continue
             same_session = agent.id == identifier and (not session_id or not agent.session_id
                                                         or agent.session_id == session_id)
@@ -380,9 +381,9 @@ class Spoke:
                 continue
             state = 'open' if agent.conn else 'closed'
             raise ProtocolError('name_taken', f'"{name}" is already used by {agent.id} ({state}). Rename this session '
-                                f'(/rename), or free the name with `agent-link remove {name}`.')
+                                f'(/rename), or free the name with `agent-link remove {agent.id}`.')
         for agent in self.others():
-            if agent.get('name') == name:
+            if agent.get('name') == name and agent.get('tool') == tool:
                 raise ProtocolError('name_taken', f'"{name}" is already used by {agent["id"]}. Rename this session '
                                     f'(/rename), or free the name with `agent-link remove {agent["id"]}` on the hub PC.')
 
@@ -404,6 +405,14 @@ class Spoke:
         self.log('agent_removed', agent=identifier, reason=reason)
         self.presence_changed()
         return {'removed': identifier, 'was': 'open' if agent.conn else 'closed'}
+
+    def rename_agent(self, old, identifier):
+        from .box import move_box, stop_waiter
+        self.agents.pop(old.id, None)
+        self.store.forget_agent(old.id)
+        stop_waiter(self.box.folder(old.id))  # the Claude hook looks the session up again and waits on the new box
+        move_box(self.box.folder(old.id), self.box.folder(identifier))
+        self.log('agent_renamed', agent=old.id, to=identifier)
 
     async def _notify_withdrawn(self, conn, reason):
         try:
@@ -454,9 +463,15 @@ class Spoke:
         if delivery not in ('push', 'box'):
             raise ProtocolError('invalid', 'delivery must be push or box')
         text = {k: str(frame.get(k) or '')[:256] for k in ('cwd', 'session_id')}
-        self.check_name_free(name, identifier, text['session_id'], conn)
+        self.check_name_free(tool, name, identifier, text['session_id'], conn)
         if conn.agent and conn.agent.id != identifier and conn.agent.conn is conn:
             conn.agent.conn = None  # renaming this session
+        if text['session_id']:
+            # The session ID, not the name, says which session this is: after a /rename the old
+            # registration and its mailbox move to the new name instead of staying behind as a closed session.
+            for old in [a for a in self.agents.values() if a.session_id == text['session_id'] and a.tool == tool
+                        and a.id != identifier]:
+                self.rename_agent(old, identifier)
         agent = Agent(identifier, self.host, tool, name, delivery=delivery, conn=conn, **text)
         self.agents[identifier] = agent
         self.store.save_agent(agent)
@@ -495,6 +510,12 @@ class Spoke:
         host, tool, name = parse_target(to)
         if host in (None, self.host):
             found = self.match(tool, name)
+            if host is None and tool is None and found:
+                # A Claude and a Codex session may share a name, here or on another host.
+                found_ids = [a.id for a in found] + [a['id'] for a in self.others() if a.get('name') == name]
+                if len(found_ids) > 1:
+                    raise ProtocolError('ambiguous', f'{", ".join(found_ids)} are all named {name}; '
+                                                     f'use claude:{name} or codex:{name}')
             if len(found) > 1:
                 raise ProtocolError('ambiguous', f'{len(found)} local sessions are named {name}; use tool:name')
             if found:

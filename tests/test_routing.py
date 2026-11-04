@@ -27,8 +27,6 @@ class SameHostTests(Environment):
         await self.server('gpu1', allow_origination='all')
         a = await self.session('gpu1', 'claude', 'alpha')
         await self.session('gpu1', 'claude', 'head')
-        with self.assertRaisesRegex(Exception, 'name_taken'):  # Claude or Codex, one session per name
-            await self.session('gpu1', 'codex', 'head')
         with self.assertRaisesRegex(Exception, 'not_found'):
             await a.send('gpu1:claude:ghost', 'x')
         self.assertEqual((await a.send('head', 'x'))['route'], 'local')
@@ -404,17 +402,32 @@ class RemoveTests(Environment):
         self.enroll('gpu2')
         await self.start_hub()
 
-    async def test_names_are_unique_across_hosts_but_a_session_keeps_its_own(self):
+    async def test_a_name_is_unique_per_tool_on_one_host(self):
+        await self.server('gpu1', allow_origination='all')
+        a = await self.session('gpu1', 'claude', 'alpha')
+        await self.session('gpu1', 'claude', 'head')
+        with self.assertRaisesRegex(Exception, 'name_taken'):
+            await self.session('gpu1', 'claude', 'head')
+        await self.session('gpu1', 'codex', 'head')  # another tool may share the name
+        with self.assertRaisesRegex(Exception, 'ambiguous.*claude:head or codex:head'):
+            await a.send('head', 'x')
+        self.assertEqual((await a.send('codex:head', 'x'))['route'], 'local')
+
+    async def test_names_are_unique_per_tool_across_hosts_but_a_session_keeps_its_own(self):
         await self.setup_hosts()
-        await self.session('local', 'claude', 'main')
+        main = await self.session('local', 'claude', 'main')
         head = await self.session('gpu1', 'claude', 'head')
         await self.connected('gpu1')
         await self.connected('gpu2')
         await until(lambda: any(a['id'] == 'gpu1:claude:head' for a in self.spokes['gpu2'].directory))
         with self.assertRaisesRegex(Exception, 'name_taken.*gpu1:claude:head'):
-            await self.session('gpu2', 'codex', 'head')
+            await self.session('gpu2', 'claude', 'head')
         with self.assertRaisesRegex(Exception, 'name_taken'):
-            await self.session('local', 'codex', 'head')  # the hub knows every host
+            await self.session('local', 'claude', 'head')  # the hub knows every host
+        await self.session('gpu2', 'codex', 'head')  # another tool may share the name
+        with self.assertRaisesRegex(Exception, 'ambiguous'):
+            await main.send('head', 'x')
+        self.assertEqual((await main.send('codex:head', 'x'))['route'], 'hub')
         again = await head.client.request('register', tool='claude', name='head', session_id='session-head')
         self.assertEqual(again['id'], 'gpu1:claude:head')
 

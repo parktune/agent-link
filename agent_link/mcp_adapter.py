@@ -17,7 +17,7 @@ from .client import SpokeClient
 from .inject import (CLAUDE_INSTRUCTIONS, CodexQueue, channel_notification, claude_channel_enabled, claude_channel_policy,
                      claude_launch_args, claude_restart_argv, codex_envelope)
 from .protocol import NAME, ProtocolError
-from .sessions import claude_session_name, codex_session_name
+from .sessions import TitleTracker, codex_session_name
 from .state import default_socket
 
 CODEX_INSTRUCTIONS = (
@@ -49,6 +49,9 @@ class Adapter:
         self.withdrawn = False  # unregistered in this session: /agent-link must not register it again quietly
         self.notify = None
         self.ready = asyncio.Event()
+        self.titles = None  # TitleTracker of this session's /rename name
+        self.followed = None  # the /rename name the registration last followed (None: follow the current one)
+        self.rename_error = None
 
     # ---- push -------------------------------------------------------------------------------
     def push_status(self):
@@ -107,6 +110,7 @@ class Adapter:
                 self.registration = {'name': name}
         if self.registration:
             await self._register()
+            await self.follow_rename()
 
     async def _register(self):
         reply = await self.client.request(
@@ -116,14 +120,54 @@ class Adapter:
         self.identity = {'id': reply['id'], 'box': reply['box']}
         return reply
 
+    FOLLOW_INTERVAL = 5
+
+    async def follow_renames(self):
+        """Keep the registration on the session's current /rename name, checked every few seconds."""
+        while True:
+            await asyncio.sleep(self.FOLLOW_INTERVAL)
+            try:
+                await self.follow_rename()
+            except (OSError, ProtocolError):
+                pass
+
+    async def follow_rename(self):
+        """Register under the session's new /rename name; the daemon moves the old registration and mailbox.
+
+        The session ID stays the same across a rename, so the daemon knows it is the same session.
+        A name given explicitly with register(name=...) is kept until the session is renamed again.
+        """
+        if not self.registration or not self.identity or self.withdrawn or not self.client.connected:
+            return
+        title = self.session_name()
+        if not title or title == self.followed:
+            return
+        self.followed = title
+        old = self.registration['name']
+        if title == old:
+            return
+        if not NAME.fullmatch(title):
+            self.rename_error = f'/rename name {title!r} cannot be an agent name (letters, digits, _ . -); kept {old}'
+            return
+        self.registration = {'name': title}
+        try:
+            await self._register()
+            self.rename_error = None
+        except ProtocolError as error:
+            self.registration = {'name': old}
+            self.rename_error = f'kept {old}: {error.detail}'
+
     # ---- tools ------------------------------------------------------------------------------
     def session_name(self):
         """The /rename name of this session, if it has one."""
-        if self.tool == 'claude':
-            return claude_session_name(self.session_id)
-        if self.thread and NAME.fullmatch(self.thread) and not codex_session_name(self.thread):
+        key = self.session_id if self.tool == 'claude' else self.thread
+        if self.titles is None or self.titles.session_id != (key or ''):
+            self.titles = TitleTracker(self.tool, key)
+        title = self.titles()
+        if self.tool == 'codex' and not title and self.thread and NAME.fullmatch(self.thread) \
+                and not codex_session_name(self.thread):
             return self.thread  # thread_id was given as the /rename name itself
-        return codex_session_name(self.thread)
+        return title
 
     def watch(self):
         """Without push, the agent-link hook (claude_hooks) wakes a Claude session when mail arrives.
@@ -163,6 +207,8 @@ class Adapter:
             result['restart'] = restart
         if self.withdrawn:
             result['withdrawn'] = True
+        if self.rename_error:
+            result['rename_error'] = self.rename_error
         return result
 
     async def register(self, name='', thread_id=''):
@@ -177,6 +223,7 @@ class Adapter:
                 raise ProtocolError('invalid', f'session name {name!r} cannot be an agent name (use letters, '
                                     'digits, _ . -); pass a name')
         self.registration = {'name': name}
+        self.followed = self.session_name()  # an explicit name holds until the session is renamed again
         self.withdrawn = False
         if not self.client.connected:
             raise ProtocolError('offline', 'agent-link daemon is not running on this machine; the registration '
@@ -304,6 +351,7 @@ async def serve(adapter):
         adapter.notify = notify
         async with anyio.create_task_group() as group:
             group.start_soon(adapter.run)
+            group.start_soon(adapter.follow_renames)
             await server.run(read_stream, write_stream,
                              server.create_initialization_options(experimental_capabilities=experimental))
             group.cancel_scope.cancel()

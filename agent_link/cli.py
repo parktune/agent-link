@@ -426,15 +426,24 @@ def claude_hook_watch(socket_path=None, wait_registration=60, interval=2.0):
         if agent or time.monotonic() >= deadline:
             break
         time.sleep(interval)
-    if not agent or agent.get('tool') != 'claude' or agent.get('delivery') != 'box' or not agent.get('box'):
-        return 0
-    box = Path(agent['box'])
-    if not watch_enabled(box):
-        return 0
-    try:
-        _, other = wait_for_mail(box, interval, new_only=True)
-    except Stopped:
-        return 0
+    box = None
+    while True:
+        if not agent or agent.get('tool') != 'claude' or agent.get('delivery') != 'box' or not agent.get('box'):
+            return 0
+        if Path(agent['box']) == box:
+            return 0  # stopped for good: the watch was turned off or the session withdrawn
+        box = Path(agent['box'])
+        if not watch_enabled(box):
+            return 0
+        try:
+            _, other = wait_for_mail(box, interval, new_only=True)
+            break
+        except Stopped:
+            pass  # after a /rename the session has a new box: look it up again
+        try:
+            agent = asyncio.run(ask(socket_path, 'lookup', session_id=session_id)).get('agent')
+        except (SystemExit, ProtocolError):
+            return 0
     if other:
         return 0
     print(hook_wake_text(box), file=sys.stderr, flush=True)
@@ -580,7 +589,7 @@ def build_parser():
     commands.add_parser('endpoint', help='Server: SSH forced command the hub runs').add_argument('--socket', type=Path)
     commands.add_parser('revoke', help='Server: delete the hub peer token and drop the hub connection')
     remove = commands.add_parser('remove', help='Remove a session\'s registration, on whatever host it lives')
-    remove.add_argument('session', help='Its name (unique across hosts), or the full host:tool:name ID')
+    remove.add_argument('session', help='Its name, tool:name (when a Claude and a Codex session share it) or the full host:tool:name ID')
     update = commands.add_parser('update', help='git pull + setup.sh + restart here; on the hub PC also every server')
     update.add_argument('--hosts', help='On the hub PC: only these servers (comma-separated names or aliases)')
     update.add_argument('--local-only', action='store_true', help='Only this machine, not the servers')

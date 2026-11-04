@@ -437,7 +437,8 @@ class Hub:
             found = [a for a in self.all_agents() if a['name'] == name and (tool is None or a['tool'] == tool)
                      and a['host'] != origin]
             if len(found) > 1:
-                raise ProtocolError('ambiguous', f'{name} exists on {len(found)} hosts; use host:tool:name')
+                raise ProtocolError('ambiguous', f'{", ".join(a["id"] for a in found)} are all named {name}; '
+                                                 f'use claude:{name} or codex:{name}')
             if not found:
                 raise ProtocolError('not_found', f'no session named {message["to"]}')
             host, message = found[0]['host'], {**message, 'to': found[0]['id']}
@@ -467,7 +468,7 @@ class Hub:
         return result
 
     async def remove(self, target):
-        """Remove a session by name (unique across hosts) or full ID, wherever it is registered."""
+        """Remove a session by name, tool:name or full ID, wherever it is registered."""
         host, tool, name = parse_target(target)
         found = [a for a in self.all_agents() if a['name'] == name and (tool is None or a['tool'] == tool)
                  and (host is None or a['host'] == host)]

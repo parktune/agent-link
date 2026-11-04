@@ -256,6 +256,16 @@ class AdapterTests(Environment):
             self.assertNotIn('ping', second)  # carried once, then moved to read/
             self.assertEqual((await adapter.call('check_box', {}))['messages'], [])
 
+            renamed = asyncio.create_task(hook('Stop'))  # a rename moves the box: the hook follows it
+            await until(lambda: adapter.whoami()['watch']['running_pid'] is not None)
+            adapter.registration = {'name': 'head2'}
+            await adapter._register()
+            await until(lambda: adapter.whoami()['watch']['running_pid'] is not None)
+            self.assertFalse(renamed.done())
+            await sender.send('claude:head2', 'after rename')
+            self.assertEqual(await asyncio.wait_for(renamed, 15), 2)
+            self.assertIn('after rename', hook.texts[-1])
+
             adapter.set_watch(False)
             self.assertEqual(await hook('Stop'), 0)  # watch off: ends at once
         finally:
@@ -465,6 +475,63 @@ class SessionNameTests(Environment):
                                               r'server:agent-link .*--resume project-head$')
             adapter.channel = True
             self.assertNotIn('restart', adapter.whoami())  # already live
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await adapter.client.close()
+            del os.environ['CLAUDE_CODE_SESSION_ID'], os.environ['CLAUDE_CONFIG_DIR']
+
+
+    def test_title_tracker_reads_only_what_was_appended(self):
+        from agent_link.sessions import TitleTracker
+        sid = '7fb85085-a689-4451-b6c0-9c5a17ad161d'
+        path = self.root / 'claude/projects/p' / f'{sid}.jsonl'
+        self.write(path, [{'type': 'custom-title', 'customTitle': 'first'}])
+        titles = TitleTracker('claude', sid, config_dir=self.root / 'claude')
+        self.assertEqual(titles(), 'first')
+        with path.open('a') as handle:
+            handle.write(json.dumps({'type': 'user', 'message': 'hi'}) + '\n')
+            handle.write('{"type": "custom-title", "customTitle": "sec')  # still being written
+        self.assertEqual(titles(), 'first')
+        with path.open('a') as handle:
+            handle.write('ond"}\n')
+        self.assertEqual(titles(), 'second')
+
+    async def test_registration_follows_a_rename_with_its_mailbox(self):
+        await self.server('gpu1')
+        sid = '11111111-2222-3333-4444-555555555555'
+        transcript = self.root / 'claude/projects/p' / f'{sid}.jsonl'
+        self.write(transcript, [{'type': 'custom-title', 'customTitle': 'old-name'}])
+        os.environ['CLAUDE_CODE_SESSION_ID'] = sid
+        os.environ['CLAUDE_CONFIG_DIR'] = str(self.root / 'claude')
+        adapter = Adapter('claude', self.root / 'gpu1/s.sock', channel=False)
+        task = asyncio.create_task(adapter.run())
+        try:
+            await until(lambda: adapter.client.connected)
+            self.assertEqual((await adapter.call('register', {}))['id'], 'gpu1:claude:old-name')
+            peer = await self.session('gpu1', 'claude', 'peer')
+            self.assertEqual((await peer.send('old-name', 'before the rename'))['status'], 'stored')
+            other = await self.session('gpu1', 'claude', 'taken')
+            with transcript.open('a') as handle:
+                handle.write(json.dumps({'type': 'custom-title', 'customTitle': 'taken'}) + '\n')
+            await adapter.follow_rename()
+            self.assertEqual(adapter.whoami()['id'], 'gpu1:claude:old-name')  # the new name is taken: kept
+            self.assertIn('kept old-name', adapter.whoami()['rename_error'])
+            with transcript.open('a') as handle:
+                handle.write(json.dumps({'type': 'custom-title', 'customTitle': 'new-name'}) + '\n')
+            await adapter.follow_rename()
+            me = adapter.whoami()
+            self.assertEqual(me['id'], 'gpu1:claude:new-name')
+            self.assertNotIn('rename_error', me)
+            spoke = self.spokes['gpu1']
+            self.assertNotIn('gpu1:claude:old-name', spoke.agents)  # moved, not left behind as a closed session
+            self.assertEqual(spoke.lookup(sid)['name'], 'new-name')
+            self.assertEqual([m['content'] for m in spoke.box.unread('gpu1:claude:new-name')], ['before the rename'])
+            self.assertFalse(spoke.box.folder('gpu1:claude:old-name').parent.exists())
+            with self.assertRaisesRegex(Exception, 'not_found'):
+                await peer.send('gpu1:claude:old-name', 'x')
+            self.assertEqual((await peer.send('new-name', 'after'))['status'], 'stored')
+            del other
         finally:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)

@@ -21,6 +21,61 @@ def _entries(path, marker):
         return
 
 
+class TitleTracker:
+    """The latest /rename name of one session, reading only what its record gained since the last call.
+
+    Cheap enough to call every few seconds: a Claude transcript grows with every turn, so it is read once
+    and then only from where the last call stopped.
+    """
+
+    def __init__(self, tool, session_id, config_dir=None, codex_home=None):
+        self.tool, self.session_id = tool, session_id or ''
+        self.config_dir, self.codex_home = config_dir, codex_home
+        self.path, self.offset, self.title = None, 0, None
+
+    def _find(self):
+        if self.tool == 'claude':
+            if not SESSION_ID.fullmatch(self.session_id):
+                return None
+            root = Path(self.config_dir or os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude') / 'projects'
+            return next(iter(root.glob(f'*/{self.session_id}.jsonl')), None)
+        if not self.session_id:
+            return None
+        return Path(self.codex_home or os.environ.get('CODEX_HOME') or Path.home() / '.codex') / 'session_index.jsonl'
+
+    def _title(self, entry):
+        if self.tool == 'claude':
+            return entry.get('customTitle') if entry.get('type') == 'custom-title' else None
+        return entry.get('thread_name') if entry.get('id') == self.session_id else None
+
+    def __call__(self):
+        self.path = self.path or self._find()
+        if self.path is None:
+            return None
+        try:
+            size = self.path.stat().st_size
+            if size < self.offset:
+                self.offset = 0  # rewritten
+            with open(self.path, 'rb') as handle:
+                handle.seek(self.offset)
+                data = handle.read(max(0, size - self.offset))
+        except OSError:
+            self.path = None
+            return self.title
+        complete = data[:data.rfind(b'\n') + 1]  # a line still being written is read next time
+        self.offset += len(complete)
+        marker = b'"custom-title"' if self.tool == 'claude' else self.session_id.encode()
+        for line in complete.splitlines():
+            if marker in line:
+                try:
+                    title = self._title(json.loads(line))
+                except (ValueError, AttributeError):
+                    continue
+                if title:
+                    self.title = title
+        return self.title
+
+
 def claude_session_name(session_id, config_dir=None):
     """Latest `/rename` title of a Claude Code session (`custom-title` entries in its transcript)."""
     if not session_id or not SESSION_ID.fullmatch(session_id):

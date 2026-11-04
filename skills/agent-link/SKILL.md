@@ -18,7 +18,8 @@ Call `whoami`.
 - `registered` false otherwise: register quietly under the session's own name and go on.
   - Claude: if `whoami` shows a valid `session_name` (set with `/rename`), call `register()` with no arguments.
   - Codex: run `printenv CODEX_THREAD_ID`; if it prints an ID, call `register(thread_id=<ID>)`.
-  - If it fails with `name_taken`, another session already uses that name (names are unique across all machines, Claude and Codex alike): tell the user, who can `/rename` this session or free the name with `agent-link remove <name>`.
+  - If it fails with `name_taken`, another session of the same tool already uses that name (a name is unique per tool across all machines; a Claude and a Codex session may share one): tell the user, who can `/rename` this session or free the name with `agent-link remove <tool>:<name>`.
+  - The registration follows the session ID: after a `/rename` it moves to the new name by itself, mailbox included. If `whoami` shows `rename_error`, the new name could not be taken; tell the user once.
   - If that fails (no `/rename` name, or the name has characters other than letters, digits, `_ . -`), stop and ask the user to name the session with `/rename <name>` (or to give a name, then call `register(name=<name>)`). Never invent a name.
   - Mention the registered ID in one line. If `push.available` is false and `push.reason` is not about the organization, add once that messages go to the mailbox and that `agent-link claude resume <session name>` in a terminal reopens this session with live push.
 - Claude without push: the agent-link hook wakes this session when mail arrives; there is nothing to start. If `watch.hook_installed` is false, say once that the hook is missing and that running `./setup.sh` in the agent-link clone adds it. Never start a watch command or poll the mailbox yourself.
@@ -27,6 +28,7 @@ Call `whoami`.
 
 1. Work out the target from the user's words. Call `list_agents` (with a filter if helpful) and map the description ("the project-head Claude session on gpu-server 1") to exactly one ID.
    - Pick only a session whose name matches exactly. A session with a similar name, or the same name on another host, is a different session: never send to it as a substitute.
+   - A Claude and a Codex session may share a name. If the user named the tool ("the codex trainer session"), pick that one. If not and both exist, ask which one; never pick one yourself.
    - If no registered session matches and this is Claude Code with the `ListAgents` and `SendMessage` tools, check `ListAgents`: it lists the Claude sessions on this machine, including ones not registered with agent-link. If exactly one matches, send with `SendMessage` instead and say so in one line. That route does not keep a mailbox copy and does not reach a closed session.
    - If nothing matches, or several do, show the candidates and ask the user. Never guess.
 2. Call `send_message(to=<ID>, content=<message>)`. Write the content as a clear, self-contained request: the receiver has none of this conversation. Write normal sentences with normal spacing and punctuation, in the language the user is using; keep it short by saying less, not by squeezing words together or dropping spaces, because the receiver and the user both have to read it. Never include secrets, tokens or credentials.
@@ -34,7 +36,7 @@ Call `whoami`.
    - `delivered`: pushed into the open session.
    - `stored` / `stored_offline`: saved to the receiver's mailbox (it was not reachable live, or is closed).
    - `queued`: this server cannot reach the hub right now; it is sent when the hub reconnects.
-   - Errors: `not_found` (that session is not registered yet), `ambiguous` (use the full ID), `offline` (that host is not connected), `origination_denied` (this server only allows replies), `too_large`.
+   - Errors: `not_found` (that session is not registered yet), `ambiguous` (several sessions match, for example a Claude and a Codex session with the same name: ask the user, then use `claude:<name>`, `codex:<name>` or the full ID), `offline` (that host is not connected), `origination_denied` (this server only allows replies), `too_large`.
 
 ## 3. Check the mailbox
 

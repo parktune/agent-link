@@ -79,6 +79,27 @@ class Stopped(Exception):
     """The waiter was asked to stop (SIGTERM from `stop_waiter`)."""
 
 
+def move_box(old, new):
+    """Carry a renamed session's mailbox (received/ folders) over to its new name, read and unread mail alike."""
+    old, new = Path(old).parent, Path(new).parent
+    if not old.is_dir() or old == new:
+        return
+    if not new.exists():
+        os.replace(old, new)
+        (new / 'watch.pid').unlink(missing_ok=True)
+        return
+    for sub in ('received', 'received/read'):
+        if (old / sub).is_dir():
+            target = _private(new / sub)
+            for path in (old / sub).glob('*.md'):
+                os.replace(path, target / path.name)
+    if (old / 'watch.off').exists():
+        (new / 'watch.off').touch()
+    for path in sorted(old.rglob('*'), reverse=True):
+        path.unlink() if path.is_file() else path.rmdir()
+    old.rmdir()
+
+
 def watch_files(folder):
     """(watch.pid, watch.off) next to a received/ folder."""
     parent = Path(folder).parent
