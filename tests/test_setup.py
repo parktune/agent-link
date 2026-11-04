@@ -196,6 +196,9 @@ class ResumeTests(unittest.TestCase):
         for tool in ('claude', 'codex'):
             fake = self.bin / tool
             fake.write_text(f'#!{sys.executable}\nimport json, os, sys\n'
+                            f'if sys.argv[1:3] == ["agents", "--json"]:\n'
+                            f'    print(open({str(self.root / "agents.json")!r}).read() if os.path.exists({str(self.root / "agents.json")!r}) else "[]")\n'
+                            f'    sys.exit()\n'
                             f'json.dump({{"tool": "{tool}", "argv": sys.argv[1:], "cwd": os.getcwd(), '
                             f'"register": os.environ.get("AGENT_LINK_REGISTER")}}, open({str(self.root / "ran.json")!r}, "w"))\n')
             fake.chmod(0o755)
@@ -205,14 +208,39 @@ class ResumeTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def transcript(self, session_id, title, cwd):
+    def transcript(self, session_id, title, cwd, continued_in=()):
         path = self.root / 'claude/projects/-p' / f'{session_id}.jsonl'
         path.parent.mkdir(parents=True, exist_ok=True)
         lines = [{'type': 'user', 'cwd': str(cwd), 'message': 'hi'}]
         if title:
             lines.append({'type': 'custom-title', 'customTitle': title, 'sessionId': session_id})
+        lines += [{'type': 'continued-in', 'sessionId': session_id, 'continuedInSessionId': later} for later in continued_in]
         path.write_text(''.join(json.dumps(line) + '\n' for line in lines))
         return path
+
+    def test_resume_follows_the_session_to_its_newest_continuation(self):
+        # Sent to the background twice: the original names three IDs, the last one never got a transcript.
+        original, copy, newer = ('11111111-0000-0000-0000-00000000000' + c for c in 'abc')
+        self.transcript(original, 'worker', self.work, continued_in=[copy, '99999999-0000-0000-0000-000000000000'])
+        self.transcript(copy, 'worker', self.work, continued_in=[newer])
+        self.transcript(newer, 'worker (2)', self.work)
+        for target in ('worker', original, copy):
+            result, ran = self.run_cli('--resume', target)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(ran['argv'][-2:], ['--resume', newer])
+            self.assertIn(f'was continued in {newer}', result.stderr)
+            self.assertNotIn('also named', result.stderr)  # the copies are one conversation, not two sessions
+
+    def test_resume_refuses_a_session_running_in_the_background(self):
+        sid = '11111111-2222-3333-4444-555555555555'
+        self.transcript(sid, 'project-head', self.work)
+        (self.root / 'agents.json').write_text(json.dumps([{'sessionId': sid, 'name': 'project-head', 'kind': 'background'}]))
+        result, ran = self.run_cli('--resume', 'project-head')
+        self.assertEqual((result.returncode, ran), (1, None))
+        self.assertIn(f'claude attach {sid}', result.stderr)
+        (self.root / 'agents.json').write_text(json.dumps([{'sessionId': sid, 'kind': 'interactive'}]))
+        result, ran = self.run_cli('--resume', 'project-head')
+        self.assertEqual(ran['argv'][-2:], ['--resume', sid])
 
     def run_cli(self, *argv):
         env = {**os.environ, 'PATH': f'{self.bin}:{os.environ["PATH"]}', 'CLAUDE_CONFIG_DIR': str(self.root / 'claude'),

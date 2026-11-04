@@ -113,11 +113,84 @@ def _transcript(path, needles):
     return None
 
 
+def _claude_continued_in(data):
+    """Session IDs a transcript says it was continued in (`continued-in` entries), oldest first.
+
+    Claude Code writes one each time it moves the session to a new ID, e.g. when it is sent to the background.
+    """
+    ids, pos = [], 0
+    while (at := data.find(b'"continued-in"', pos)) != -1:
+        start, end = data.rfind(b'\n', 0, at) + 1, data.find(b'\n', at)
+        end = len(data) if end == -1 else end
+        pos = end
+        try:
+            entry = json.loads(data[start:end])
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and entry.get('type') == 'continued-in' and entry.get('continuedInSessionId'):
+            ids.append(entry['continuedInSessionId'])
+    return ids
+
+
+def _claude_transcript_path(root, session_id):
+    return next(iter(root.glob(f'*/{session_id}.jsonl')), None) if SESSION_ID.fullmatch(session_id) else None
+
+
+def _claude_latest_continuation(root, path):
+    """Transcript of the newest session that `path` was continued in (following the chain), or `path` itself.
+
+    A continuation that never got a transcript (opened and closed without a turn) is skipped.
+    """
+    seen = {path.stem}
+    while True:
+        data = _transcript(path, [b'"continued-in"'])
+        if data is None:
+            return path
+        try:
+            targets = _claude_continued_in(data)
+        finally:
+            data.close()
+        for target in reversed(targets):
+            following = None if target in seen else _claude_transcript_path(root, target)
+            if following:
+                seen.add(target)
+                path = following
+                break
+        else:
+            return path
+
+
+def _claude_entry(path):
+    data = _transcript(path, [])
+    if data is None:
+        return None
+    try:
+        match = CWD.search(data)
+        cwd = json.loads(b'"' + match.group(1) + b'"') if match else ''
+    finally:
+        data.close()
+    return {'id': path.stem, 'cwd': cwd, 'mtime': path.stat().st_mtime}
+
+
+def claude_background_sessions():
+    """Session IDs Claude Code is running in the background now (`claude agents --json`); empty if unknown."""
+    import subprocess
+    try:
+        out = subprocess.run(['claude', 'agents', '--json'], capture_output=True, text=True, timeout=15).stdout
+        agents = json.loads(out)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return set()
+    return {a.get('sessionId') for a in agents if isinstance(a, dict) and a.get('kind') == 'background'} - {None}
+
+
 def find_claude_sessions(name, config_dir=None):
-    """Claude Code sessions to resume for `name`, newest first: [{'id', 'cwd', 'mtime'}].
+    """Claude Code sessions to resume for `name`, newest first: [{'id', 'cwd', 'mtime'[, 'continued_from']}].
 
     `name` is the /rename title (the latest one counts) or a session ID. The working folder comes from
     the transcript, because `claude --resume` looks for sessions of the folder it starts in.
+    A session Claude Code continued under a new ID (it does so when the session goes to the background)
+    resolves to its newest continuation, which then carries 'continued_from'. Resuming the old ID
+    instead would reopen the conversation as it was before, and backgrounding it again makes one more copy.
     """
     root = Path(config_dir or os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude') / 'projects'
     # A session ID first (names can look like IDs, e.g. `agent-link-test`), then the /rename title.
@@ -126,20 +199,23 @@ def find_claude_sessions(name, config_dir=None):
     if not paths:
         paths = list(root.glob('*/*.jsonl'))
         needles = [b'"custom-title"', json.dumps(name, ensure_ascii=False)[1:-1].encode()]
-    found = []
+    found = {}
     for path in paths:
         data = _transcript(path, needles)
         if data is None:
             continue
-        try:
-            if needles and claude_session_name(path.stem, config_dir) != name:
-                continue
-            match = CWD.search(data)
-            cwd = json.loads(b'"' + match.group(1) + b'"') if match else ''
-        finally:
-            data.close()
-        found.append({'id': path.stem, 'cwd': cwd, 'mtime': path.stat().st_mtime})
-    return sorted(found, key=lambda s: s['mtime'], reverse=True)
+        data.close()
+        if needles and claude_session_name(path.stem, config_dir) != name:
+            continue
+        latest = _claude_latest_continuation(root, path)
+        entry = _claude_entry(latest)
+        if entry is None:
+            continue
+        if latest != path:
+            entry['continued_from'] = path.stem
+        if entry['id'] not in found or 'continued_from' not in entry:  # the session's own match wins
+            found[entry['id']] = entry
+    return sorted(found.values(), key=lambda s: s['mtime'], reverse=True)
 
 
 def _codex_home(codex_home=None):
