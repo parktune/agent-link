@@ -326,7 +326,7 @@ class Hub:
                            uplink=HubUplink(self), accept_links=False)
         self.local.list_agents = self.list_agents
         self.local.on_presence = self.publish_directory
-        self.local.remove = self.remove  # the PC's `agent-link remove` reaches every host
+        self.local.remove = self.remove  # the PC's `agent-link unregister` reaches every host
         self.local.others = lambda: [a for host in self.presence.values() for a in host]
         self.local.extra_ops = {'hosts': self._hosts_op, 'recent': self._recent_op, 'reload': self._reload_op,
                                 'status': self._status_op}
@@ -357,7 +357,7 @@ class Hub:
         for agent in agents:
             if isinstance(agent, dict) and agent.get('host') == host:
                 clean.append({k: agent.get(k) for k in ('id', 'host', 'tool', 'name', 'cwd', 'session_id',
-                                                           'started_at', 'last_seen', 'status', 'delivery')})
+                                                           'started_at', 'last_seen', 'last_message', 'status', 'delivery')})
         self.presence[host] = clean
         self.publish_directory()
 
@@ -492,7 +492,7 @@ class Hub:
         seq = int(frame.get('seq', 0))
         if seq <= self.store.last_seq(host):
             return {'op': 'ack', 'seq': seq}  # already processed before a reconnect or hub restart
-        if 'remove' in frame:  # `agent-link remove` on a server for a session on another host
+        if 'remove' in frame:  # `agent-link unregister` on a server for a session on another host
             try:
                 result = await self.remove(str((frame['remove'] or {}).get('target') or ''))
             except ProtocolError as error:

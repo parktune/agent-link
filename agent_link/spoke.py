@@ -51,7 +51,7 @@ class SpokeStore:
                 type TEXT NOT NULL, hops INTEGER NOT NULL, status TEXT NOT NULL, at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS agents(id TEXT PRIMARY KEY, tool TEXT NOT NULL, name TEXT NOT NULL,
                 cwd TEXT NOT NULL, session_id TEXT NOT NULL, delivery TEXT NOT NULL,
-                started_at REAL NOT NULL, last_seen REAL NOT NULL);
+                started_at REAL NOT NULL, last_seen REAL NOT NULL, last_message REAL NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS outbox(seq INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL,
                 body TEXT NOT NULL, size INTEGER NOT NULL, at REAL NOT NULL);
         ''')
@@ -64,6 +64,10 @@ class SpokeStore:
         # 0.4.0 stored an account label per agent; it is no longer used.
         if 'account' in {row[1] for row in self.db.execute('PRAGMA table_info(agents)')}:
             self.db.execute('ALTER TABLE agents DROP COLUMN account')
+        # When the session last sent or received a message; absent before 0.10 (counted from last_seen).
+        if 'last_message' not in {row[1] for row in self.db.execute('PRAGMA table_info(agents)')}:
+            self.db.execute('ALTER TABLE agents ADD COLUMN last_message REAL NOT NULL DEFAULT 0')
+            self.db.execute('UPDATE agents SET last_message=last_seen')
 
     def _setting(self, key):
         row = self.db.execute('SELECT value FROM settings WHERE key=?', (key,)).fetchone()
@@ -134,9 +138,10 @@ class SpokeStore:
         self.db.execute('DELETE FROM received WHERE at < ?', (time.time() - 30 * 86400,))
 
     def save_agent(self, agent):
-        self.db.execute('INSERT OR REPLACE INTO agents VALUES (?,?,?,?,?,?,?,?)',
+        self.db.execute('INSERT OR REPLACE INTO agents(id, tool, name, cwd, session_id, delivery, started_at, '
+                        'last_seen, last_message) VALUES (?,?,?,?,?,?,?,?,?)',
                         (agent.id, agent.tool, agent.name, agent.cwd, agent.session_id,
-                         agent.delivery, agent.started_at, agent.last_seen))
+                         agent.delivery, agent.started_at, agent.last_seen, agent.last_message))
 
     def known_agents(self):
         return [dict(row) for row in self.db.execute('SELECT * FROM agents')]
@@ -182,6 +187,7 @@ class Agent:
     delivery: str = 'push'  # push into the open session, or 'box' (mailbox files only)
     started_at: float = field(default_factory=time.time)
     last_seen: float = field(default_factory=time.time)
+    last_message: float = field(default_factory=time.time)  # last message sent or received
     conn: object = None
 
     @property
@@ -191,7 +197,8 @@ class Agent:
     def public(self):
         return {'id': self.id, 'host': self.host, 'tool': self.tool, 'name': self.name,
                 'cwd': self.cwd, 'session_id': self.session_id, 'started_at': self.started_at,
-                'last_seen': self.last_seen, 'status': self.status, 'delivery': self.delivery}
+                'last_seen': self.last_seen, 'last_message': self.last_message, 'status': self.status,
+                'delivery': self.delivery}
 
 
 class Conn:
@@ -240,7 +247,7 @@ class Spoke:
         self.uplink = uplink or (OutboxUplink(self) if accept_links else None)
         self.accept_links = accept_links
         # Registered agents survive restarts as offline entries so their mailbox keeps receiving.
-        fields = ('id', 'tool', 'name', 'cwd', 'session_id', 'delivery', 'started_at', 'last_seen')
+        fields = ('id', 'tool', 'name', 'cwd', 'session_id', 'delivery', 'started_at', 'last_seen', 'last_message')
         self.agents = {}
         for row in store.known_agents():
             if row['id'].split(':', 1)[0] != self.host:
@@ -338,7 +345,7 @@ class Spoke:
         op = frame['op']
         if op == 'register':
             return {'op': 'registered', **self.register(conn, frame)}
-        if op == 'remove':  # agent-link remove: only processes that can open this socket get here
+        if op == 'remove':  # agent-link unregister: only processes that can open this socket get here
             return {'op': 'removed', **await self.remove(str(frame.get('target') or ''))}
         if op == 'lookup':
             return {'op': 'lookup', 'agent': self.lookup(frame.get('session_id'))}
@@ -381,11 +388,11 @@ class Spoke:
                 continue
             state = 'open' if agent.conn else 'closed'
             raise ProtocolError('name_taken', f'"{name}" is already used by {agent.id} ({state}). Rename this session '
-                                f'(/rename), or free the name with `agent-link remove {agent.id}`.')
+                                f'(/rename), or free the name with `agent-link unregister {agent.id}`.')
         for agent in self.others():
             if agent.get('name') == name and agent.get('tool') == tool:
                 raise ProtocolError('name_taken', f'"{name}" is already used by {agent["id"]}. Rename this session '
-                                    f'(/rename), or free the name with `agent-link remove {agent["id"]}` on the hub PC.')
+                                    f'(/rename), or free the name with `agent-link unregister {agent["id"]}` on the hub PC.')
 
     def others(self):
         """Agents on other hosts (servers learn them from the hub's directory)."""
@@ -441,9 +448,13 @@ class Spoke:
         return await self.uplink.remove(target)
 
     def expire(self, now=None):
-        """Forget sessions closed for longer than offline_expiry_days (they register again when reopened)."""
-        limit = (now or time.time()) - self.config.offline_expiry_days * 86400
-        for agent in [a for a in self.agents.values() if a.conn is None and a.last_seen < limit]:
+        """Unregister closed sessions not opened for offline_expiry_days, or without a message sent or received
+        for idle_expiry_days. Nothing is kept: the user registers such a session again to use it.
+        """
+        now = now or time.time()
+        opened, active = now - self.config.offline_expiry_days * 86400, now - self.config.idle_expiry_days * 86400
+        for agent in [a for a in self.agents.values()
+                      if a.conn is None and (a.last_seen < opened or a.last_message < active)]:
             self.remove_agent(agent.id, reason='expired')
 
     def lookup(self, session_id):
@@ -466,13 +477,17 @@ class Spoke:
         self.check_name_free(tool, name, identifier, text['session_id'], conn)
         if conn.agent and conn.agent.id != identifier and conn.agent.conn is conn:
             conn.agent.conn = None  # renaming this session
+        earlier = [a.last_message for a in [self.agents.get(identifier)] if a]
         if text['session_id']:
             # The session ID, not the name, says which session this is: after a /rename the old
             # registration and its mailbox move to the new name instead of staying behind as a closed session.
             for old in [a for a in self.agents.values() if a.session_id == text['session_id'] and a.tool == tool
                         and a.id != identifier]:
+                earlier.append(old.last_message)
                 self.rename_agent(old, identifier)
         agent = Agent(identifier, self.host, tool, name, delivery=delivery, conn=conn, **text)
+        if earlier:
+            agent.last_message = max(earlier)  # reopening a session is not message traffic
         self.agents[identifier] = agent
         self.store.save_agent(agent)
         conn.agent = agent
@@ -491,7 +506,17 @@ class Spoke:
         raise ProtocolError('origination_denied',
                             f'allow_origination={policy}: this session may only reply to requests it received')
 
+    def mark_message(self, agent):
+        agent.last_message = time.time()
+        if self.agents.get(agent.id) is agent:
+            self.store.save_agent(agent)
+
     async def send_from(self, agent, to, content, type, in_reply_to):
+        result = await self._send_from(agent, to, content, type, in_reply_to)
+        self.mark_message(agent)
+        return result
+
+    async def _send_from(self, agent, to, content, type, in_reply_to):
         if type not in TYPES:
             raise ProtocolError('invalid', 'type must be request or reply')
         parent = self.store.received(in_reply_to) if in_reply_to else None
@@ -554,6 +579,7 @@ class Spoke:
             self.box.put(message)
             status = 'stored' if agent.conn else 'stored_offline'
         self.store.remember(message, status)
+        self.mark_message(agent)
         self.log('delivered', id=message['id'], to=agent.id, status=status)
         return {'id': message['id'], 'status': status}
 
@@ -730,7 +756,7 @@ class LinkSession:
             spoke.spawn(self._deliver(frame.get('msg')))
         elif op == 'directory':
             spoke.directory = directory_entries(frame.get('agents'), exclude_host=spoke.host)
-        elif op == 'forget':  # agent-link remove on the hub PC
+        elif op == 'forget':  # agent-link unregister on the hub PC
             try:
                 spoke.remove_agent(spoke.resolve(str(frame.get('id', ''))))
             except ProtocolError:

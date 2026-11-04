@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import shlex
 import signal
 import subprocess
 import sys
@@ -243,7 +244,7 @@ class ResumeTests(unittest.TestCase):
 
     def run_cli(self, *argv):
         env = {**os.environ, 'PATH': f'{self.bin}:{os.environ["PATH"]}', 'CLAUDE_CONFIG_DIR': str(self.root / 'claude'),
-               'CODEX_HOME': str(self.root / 'codex')}
+               'CODEX_HOME': str(self.root / 'codex'), 'AGENT_HUB_STATE': str(self.root / 'state')}
         (self.root / 'ran.json').unlink(missing_ok=True)
         result = subprocess.run([sys.executable, '-m', 'agent_link', *argv], env=env, capture_output=True, text=True,
                                 timeout=30, cwd=self.root)
@@ -298,6 +299,22 @@ class ResumeTests(unittest.TestCase):
         _, ran = self.run_cli('claude', 'continue')
         self.assertEqual(ran['argv'][-1], '--continue')
 
+    def test_claude_register_starts_a_new_named_session(self):
+        result, ran = self.run_cli('claude', 'register', 'new-head', '--', '--model', 'opus')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        argv = ran['argv']
+        self.assertEqual(argv[argv.index('--name') + 1], 'new-head')
+        self.assertRegex(argv[argv.index('--session-id') + 1], r'^[0-9a-f]{8}-[0-9a-f]{4}-4')
+        self.assertEqual((argv[-2:], ran['register']), (['--model', 'opus'], 'new-head'))
+        self.transcript('11111111-2222-3333-4444-555555555555', 'new-head', self.work)
+        result, ran = self.run_cli('claude', 'register', 'new-head')
+        self.assertEqual((result.returncode, ran), (1, None))
+        self.assertIn('agent-link claude resume new-head', result.stderr)
+        result, ran = self.run_cli('claude', 'register', 'bad name')
+        self.assertEqual((result.returncode, ran), (1, None))
+        result, _ = self.run_cli('claude', 'register')
+        self.assertIn('register NAME', result.stderr)
+
     def codex_thread(self, thread, title, cwd):
         rollout = self.root / 'codex/sessions/2026/11/02' / f'rollout-2026-11-02T10-00-00-{thread}.jsonl'
         rollout.parent.mkdir(parents=True, exist_ok=True)
@@ -316,6 +333,28 @@ class ResumeTests(unittest.TestCase):
         self.assertEqual(ran['cwd'], str(self.work))
         _, ran = self.run_cli('codex', '--resume', thread)
         self.assertEqual(ran['argv'][-2:], ['resume', thread])
+
+    def test_codex_register_creates_a_named_thread_and_opens_it(self):
+        from unittest import mock
+        from agent_link import cli, codex_app
+        thread = '33333333-0000-0000-0000-000000000000'
+        os.environ['CODEX_HOME'] = str(self.root / 'codex')
+        try:
+            with mock.patch.object(codex_app, 'create_named_thread', return_value=thread) as create, \
+                    mock.patch.object(cli, 'launch') as launch, mock.patch.object(cli.shutil, 'which', return_value='codex'), \
+                    mock.patch.object(cli.service, 'alive', return_value=False):
+                cli.agent_link(['codex', 'register', 'trainer'])
+            self.assertEqual(create.call_args.args[0], 'trainer')
+            argv = launch.call_args.args[0]
+            self.assertEqual(argv[-2:], ['resume', thread])
+            self.assertIn('mcp_servers.agent-link.env.AGENT_LINK_REGISTER="trainer"', argv)
+            self.assertIn(f'mcp_servers.agent-link.env.AGENT_LINK_THREAD="{thread}"', argv)
+            self.assertEqual(launch.call_args.kwargs['name'], 'trainer')
+            self.codex_thread(thread, 'trainer', self.work)
+            with self.assertRaisesRegex(SystemExit, 'already exists'), mock.patch.object(cli.shutil, 'which', return_value='codex'):
+                cli.agent_link(['codex', 'register', 'trainer'])
+        finally:
+            del os.environ['CODEX_HOME']
 
     def test_codex_last_picks_this_folders_newest_thread_and_picker_has_none(self):
         self.codex_thread('22222222-0000-0000-0000-000000000000', 'elsewhere', self.root)
@@ -358,3 +397,61 @@ class UpdateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             Path(root, 'config.toml').write_text('mirror_local_metadata = false\nmax_hops = 2\n')
             self.assertEqual(Config.load(root).max_hops, 2)
+
+
+FAKE_APP_SERVER = r'''
+import json, struct, sys
+read, write = sys.stdin.buffer.read, sys.stdout.buffer.write
+head = b''
+while not head.endswith(b'\r\n\r\n'):
+    head += read(1)
+write(b'HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\n\r\n')
+sys.stdout.flush()
+
+def send(obj):
+    data = json.dumps(obj).encode()
+    write(bytes([0x81, len(data)]) if len(data) < 126 else bytes([0x81, 126]) + struct.pack('>H', len(data)))
+    write(data)
+    sys.stdout.flush()
+
+calls = []
+while True:
+    first = read(2)
+    if len(first) < 2:
+        break
+    size = first[1] & 0x7f
+    if size == 126:
+        size = struct.unpack('>H', read(2))[0]
+    mask = read(4)
+    message = json.loads(bytes(b ^ mask[i % 4] for i, b in enumerate(read(size))))
+    calls.append(message)
+    open(sys.argv[1], 'w').write(json.dumps(calls))
+    if 'id' not in message:
+        continue
+    send({'method': 'thread/started', 'params': {}})  # a notification first: it must be skipped
+    if message['method'] == 'thread/name/set' and message['params']['name'] == 'refused':
+        send({'id': message['id'], 'error': {'message': 'name rejected'}})
+    elif message['method'] == 'thread/start':
+        send({'id': message['id'], 'result': {'thread': {'id': 'thread-1'}}})
+    else:
+        send({'id': message['id'], 'result': {}})
+'''
+
+
+class CodexAppTests(unittest.TestCase):
+    def test_creates_and_names_a_thread_over_the_app_server_websocket(self):
+        from agent_link.codex_app import CodexAppError, create_named_thread
+        with tempfile.TemporaryDirectory() as root:
+            fake, log, server = Path(root, 'codex'), Path(root, 'calls.json'), Path(root, 'server.py')
+            server.write_text(FAKE_APP_SERVER)
+            fake.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(server))} {shlex.quote(str(log))}\n')
+            fake.chmod(0o755)
+            self.assertEqual(create_named_thread('trainer', '/work', executable=str(fake)), 'thread-1')
+            calls = json.loads(log.read_text())
+            self.assertEqual([c['method'] for c in calls], ['initialize', 'initialized', 'thread/start', 'thread/name/set'])
+            self.assertEqual(calls[2]['params'], {'cwd': '/work'})
+            self.assertEqual(calls[3]['params'], {'threadId': 'thread-1', 'name': 'trainer'})
+            with self.assertRaisesRegex(CodexAppError, 'name rejected'):
+                create_named_thread('refused', '/work', executable=str(fake))
+            with self.assertRaisesRegex(CodexAppError, 'codex app-server daemon start'):
+                create_named_thread('x', '/work', executable='false')

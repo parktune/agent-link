@@ -12,6 +12,7 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
 
 from .box import REPO_ROOT, Box, Stopped, default_box_root, read_unread, wait_for_mail, watch_enabled
 from .client import SpokeClient
@@ -562,10 +563,11 @@ def build_parser():
     opening.add_argument('--continue', dest='continue_', action='store_true', help='Same as `agent-link claude --continue`')
     commands = parser.add_subparsers(dest='command')
     for tool, latest in (('claude', 'continue'), ('codex', 'last')):
-        session = commands.add_parser(tool, help=f'Open {tool} registered with agent-link: resume [SESSION] | {latest}. '
-                                                 f'Arguments after -- go to {tool}.')
-        session.add_argument('words', nargs='*', metavar='resume [SESSION] | ' + latest,
-                             help='SESSION is the /rename name or the session ID; resume without one opens the picker')
+        session = commands.add_parser(tool, help=f'Open {tool} registered with agent-link: register NAME | '
+                                                 f'resume [SESSION] | {latest}. Arguments after -- go to {tool}.')
+        session.add_argument('words', nargs='*', metavar=f'register NAME | resume [SESSION] | {latest}',
+                             help='register NAME starts a new session with that name; SESSION is the /rename name or '
+                                  'the session ID; resume without one opens the picker')
         session.add_argument('--resume', nargs='?', const='', metavar='SESSION')
         session.add_argument('--continue', '--last', dest='continue_', action='store_true',
                              help="This folder's most recent conversation")
@@ -588,8 +590,8 @@ def build_parser():
     daemon.add_argument('--force', action='store_true', help='Run even though this machine is set up as the hub')
     commands.add_parser('endpoint', help='Server: SSH forced command the hub runs').add_argument('--socket', type=Path)
     commands.add_parser('revoke', help='Server: delete the hub peer token and drop the hub connection')
-    remove = commands.add_parser('remove', help='Remove a session\'s registration, on whatever host it lives')
-    remove.add_argument('session', help='Its name, tool:name (when a Claude and a Codex session share it) or the full host:tool:name ID')
+    unregister = commands.add_parser('unregister', help='Unregister a session, on whatever host it lives')
+    unregister.add_argument('session', help='Its name, tool:name (when a Claude and a Codex session share it) or the full host:tool:name ID')
     update = commands.add_parser('update', help='git pull + setup.sh + restart here; on the hub PC also every server')
     update.add_argument('--hosts', help='On the hub PC: only these servers (comma-separated names or aliases)')
     update.add_argument('--local-only', action='store_true', help='Only this machine, not the servers')
@@ -834,8 +836,9 @@ def pick_session(found, what, target):
     return session
 
 
-def launch(argv, shown=None):
-    os.environ['AGENT_LINK_REGISTER'] = '1'  # the session's agent-link MCP server registers it on start
+def launch(argv, shown=None, name='1'):
+    # The session's agent-link MCP server registers it on start: under `name`, or '1' for its /rename name.
+    os.environ['AGENT_LINK_REGISTER'] = name
     say_err(f'{shlex.join(shown or argv)}  (in {os.getcwd()})')
     os.execvp(argv[0], argv)
 
@@ -853,7 +856,12 @@ def open_claude(action=None, target=None, extra=()):
     if not shutil.which('claude'):
         raise SystemExit('claude (Claude Code) is not on PATH')
     picker = action == 'resume' and not target
-    if action == 'continue':
+    name = '1'
+    if action == 'register':
+        check_new_name('claude', target, find_claude_sessions(target))
+        # A session ID chosen up front, so the hook and the registration know the session from its first second.
+        name, mode = target, ['--session-id', str(uuid.uuid4()), '--name', target]
+    elif action == 'continue':
         mode = ['--continue']
     elif action == 'resume' and target:
         session = pick_session(find_claude_sessions(target), 'Claude', target)
@@ -870,7 +878,7 @@ def open_claude(action=None, target=None, extra=()):
     blocked = claude_channel_policy()
     if not blocked:
         say_err('messages arrive live in this session (push).')
-        return launch(['claude', *CHANNEL, *mode, *extra])
+        return launch(['claude', *CHANNEL, *mode, *extra], name=name)
     from . import claude_hooks
     say_err(f'{blocked}.')
     if claude_hooks.installed():
@@ -878,7 +886,7 @@ def open_claude(action=None, target=None, extra=()):
     else:
         say_err(f'messages go to the mailbox, but the hook that wakes the session is missing from '
                 f'{claude_hooks.settings_path()}; run ./setup.sh in the agent-link clone. Until then check with /agent-link.')
-    return launch(['claude', *mode, *extra])
+    return launch(['claude', *mode, *extra], name=name)
 
 
 def open_codex(action=None, target=None, extra=()):
@@ -889,14 +897,22 @@ def open_codex(action=None, target=None, extra=()):
     from .sessions import find_codex_sessions, latest_codex_session
     if not shutil.which('codex'):
         raise SystemExit('codex is not on PATH')
-    session = None
-    if action == 'resume' and target:
+    session, name = None, '1'
+    if action == 'register':
+        from .codex_app import CodexAppError, create_named_thread
+        check_new_name('codex', target, find_codex_sessions(target))
+        try:
+            session, name = {'id': create_named_thread(target, os.getcwd())}, target
+        except CodexAppError as error:
+            raise SystemExit(str(error)) from None
+        say_err(f'created Codex session "{target}" ({session["id"]})')
+    elif action == 'resume' and target:
         session = pick_session(find_codex_sessions(target), 'Codex', target)
     elif action == 'continue':
         session = latest_codex_session(os.getcwd())
         if not session:
             raise SystemExit(f'No Codex session ran in {os.getcwd()} yet. Use `agent-link codex resume <name>`.')
-    env = [('AGENT_LINK_REGISTER', '1')] + ([('AGENT_LINK_THREAD', session['id'])] if session else [])
+    env = [('AGENT_LINK_REGISTER', name)] + ([('AGENT_LINK_THREAD', session['id'])] if session else [])
     overrides = [part for key, value in env for part in ('-c', f'mcp_servers.agent-link.env.{key}={json.dumps(value)}')]
     if session:
         mode = ['resume', session['id']]
@@ -905,22 +921,44 @@ def open_codex(action=None, target=None, extra=()):
         mode = ['resume'] if action == 'resume' else []
         say_err('the thread is not known yet, so messages go to the mailbox until you run $agent-link once in the '
                 'session (after /rename).')
-    return launch(['codex', *overrides, *mode, *extra])
+    return launch(['codex', *overrides, *mode, *extra], name=name)
 
 
-SESSION_ACTIONS = {'resume': 'resume', 'continue': 'continue', 'last': 'continue'}
+SESSION_ACTIONS = {'resume': 'resume', 'continue': 'continue', 'last': 'continue', 'register': 'register'}
 
 
 def session_action(parser, args):
-    """`resume [SESSION]`, `continue`/`last`, or the same as --resume/--continue/--last: (action, target)."""
+    """`register NAME`, `resume [SESSION]`, `continue`/`last`, or --resume/--continue/--last: (action, target)."""
     action = 'resume' if args.resume is not None else 'continue' if args.continue_ else None
     target = args.resume or None
     words = list(getattr(args, 'words', None) or [])
     if words:
-        if words[0] not in SESSION_ACTIONS or len(words) > 2 or (len(words) == 2 and words[0] != 'resume'):
-            parser.error('use: resume [SESSION] | continue (codex: last)')
+        if words[0] not in SESSION_ACTIONS or len(words) > 2 or (len(words) == 2 and words[0] not in ('resume', 'register')):
+            parser.error('use: register NAME | resume [SESSION] | continue (codex: last)')
         action, target = SESSION_ACTIONS[words[0]], words[1] if len(words) == 2 else target
+        if action == 'register' and not target:
+            parser.error('use: register NAME (the name of the new session)')
     return action, target
+
+
+def check_new_name(tool, name, sessions):
+    """`register NAME` starts a new session: refuse a name that a session already has."""
+    try:
+        check_name(name)
+    except ProtocolError:
+        raise SystemExit(f'"{name}" cannot be a session name (letters, digits, _ . - only)') from None
+    if sessions:
+        raise SystemExit(f'a {tool} session named "{name}" already exists; open it with '
+                         f'`agent-link {tool} resume {name}`')
+    if service.alive():
+        try:
+            agents = asyncio.run(ask(default_socket(), 'list')).get('agents', [])
+        except (SystemExit, ProtocolError):
+            agents = []
+        taken = [a['id'] for a in agents if a.get('tool') == tool and a.get('name') == name]
+        if taken:
+            raise SystemExit(f'"{name}" is already registered by {taken[0]}; open it with '
+                             f'`agent-link {tool} resume {name}`, or pick another name')
 
 
 def agent_link(argv=None):
@@ -945,14 +983,14 @@ def agent_link(argv=None):
         return show_status(args.socket or default_socket(), args.json)
     if args.command == 'update':
         return run_update(args)
-    if args.command == 'remove':
+    if args.command == 'unregister':
         if not service.alive():
             raise SystemExit('agent-link is not running on this machine (agent-link hub up / agent-link up)')
         try:
             reply = asyncio.run(ask(default_socket(), 'remove', target=args.session))
         except ProtocolError as error:
             raise SystemExit(f'{error.code}: {error.detail}') from None
-        print(f'removed {reply["removed"]} ({reply.get("was", "")})')
+        print(f'unregistered {reply["removed"]} ({reply.get("was", "")})')
         return 0
     if args.command == 'hub':
         args.command = args.hub_command
