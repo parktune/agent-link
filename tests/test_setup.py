@@ -196,9 +196,14 @@ class ResumeTests(unittest.TestCase):
         for tool in ('claude', 'codex'):
             fake = self.bin / tool
             fake.write_text(f'#!{sys.executable}\nimport json, os, sys\n'
+                            f'agents = json.load(open({str(self.root / "agents.json")!r})) if os.path.exists({str(self.root / "agents.json")!r}) else []\n'
                             f'if sys.argv[1:3] == ["agents", "--json"]:\n'
-                            f'    print(open({str(self.root / "agents.json")!r}).read() if os.path.exists({str(self.root / "agents.json")!r}) else "[]")\n'
+                            f'    print(json.dumps(agents))\n'
                             f'    sys.exit()\n'
+                            # Like Claude Code 2.1.318: attach matches the start of a background job ID (8 hex digits).
+                            f'if sys.argv[1:2] == ["attach"] and not [a for a in agents if a.get("kind") == "background" '
+                            f'and (a.get("id") or a.get("sessionId", "")[:8]).startswith(sys.argv[2])]:\n'
+                            f'    sys.exit("No job matching " + repr(sys.argv[2]))\n'
                             f'json.dump({{"tool": "{tool}", "argv": sys.argv[1:], "cwd": os.getcwd(), '
                             f'"register": os.environ.get("AGENT_LINK_REGISTER")}}, open({str(self.root / "ran.json")!r}, "w"))\n')
             fake.chmod(0o755)
@@ -234,10 +239,14 @@ class ResumeTests(unittest.TestCase):
     def test_resume_attaches_to_a_background_session_instead_of_forking_it(self):
         sid = '11111111-2222-3333-4444-555555555555'
         self.transcript(sid, 'project-head', self.work)
-        (self.root / 'agents.json').write_text(json.dumps([{'sessionId': sid, 'name': 'project-head', 'kind': 'background'}]))
+        (self.root / 'agents.json').write_text(json.dumps([{'id': '11111111', 'sessionId': sid, 'name': 'project-head',
+                                                             'kind': 'background', 'status': 'stopped'}]))
         result, ran = self.run_cli('--resume', 'project-head')
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(ran['argv'], ['attach', sid])
+        self.assertEqual(ran['argv'], ['attach', '11111111'])  # the job ID: a session UUID matches no job
+        (self.root / 'agents.json').write_text(json.dumps([{'sessionId': sid, 'kind': 'background'}]))
+        result, ran = self.run_cli('--resume', 'project-head')  # no job ID listed: its start, the first 8 digits
+        self.assertEqual(ran['argv'], ['attach', '11111111'])
         self.assertIn('attaching', result.stderr)
         (self.root / 'agents.json').write_text(json.dumps([{'sessionId': sid, 'kind': 'interactive'}]))
         result, ran = self.run_cli('--resume', 'project-head')

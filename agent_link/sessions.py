@@ -203,15 +203,17 @@ def _claude_entry(path):
 
 
 def claude_background_sessions():
-    """Session IDs Claude Code keeps as background sessions, running or stopped (`claude agents --json --all`);
-    empty if unknown."""
+    """Background sessions Claude Code keeps, running or stopped (`claude agents --json --all`), as
+    {session ID: job ID}; empty if unknown. `claude attach`/`stop` take the job ID (8 hex digits, the start of
+    the session ID), not the session ID."""
     import subprocess
     try:
         out = subprocess.run(['claude', 'agents', '--json', '--all'], capture_output=True, text=True, timeout=15).stdout
         agents = json.loads(out)
     except (OSError, subprocess.SubprocessError, ValueError):
         return set()
-    return {a.get('sessionId') for a in agents if isinstance(a, dict) and a.get('kind') == 'background'} - {None}
+    return {a['sessionId']: a.get('id') or a['sessionId'][:8] for a in agents
+            if isinstance(a, dict) and a.get('kind') == 'background' and a.get('sessionId')}
 
 
 def find_claude_sessions(name, config_dir=None):

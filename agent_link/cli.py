@@ -869,11 +869,12 @@ def open_claude(action=None, target=None, extra=()):
         if session.get('continued_from'):
             say_err(f'{session["continued_from"]} was continued in {session["id"]} (Claude Code gives a session a new ID '
                     f'when it goes to the background); opening {session["id"]}')
-        if session['id'] in claude_background_sessions():
+        job = claude_background_sessions().get(session['id'])
+        if job:
             # `--resume` would fork it into another copy under a new ID; attach opens the background session itself.
             # Its agent-link MCP server is already running there and keeps (or takes over) the registration.
-            say_err(f'"{target}" ({session["id"]}) is a background session; attaching to it')
-            return launch(['claude', 'attach', session['id']])
+            say_err(f'"{target}" ({session["id"]}) is background job {job}; attaching to it')
+            return launch(['claude', 'attach', job])
         mode = ['--resume', session['id']]
     else:
         mode = ['--resume'] if picker else []
