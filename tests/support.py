@@ -17,8 +17,9 @@ from agent_link.state import Config, Log
 class FakeSession:
     """Stands in for an MCP adapter: registers and records what was pushed to it."""
 
-    def __init__(self, socket_path, tool, name, delivery='push', fail=False):
+    def __init__(self, socket_path, tool, name, delivery='push', fail=False, session_id=None):
         self.received, self.fail = [], fail
+        self.session_id = session_id or f'session-{name}'
         self.client = SpokeClient(socket_path, self.on_deliver)
         self.tool, self.name, self.delivery = tool, name, delivery
         self.id = None
@@ -31,7 +32,7 @@ class FakeSession:
     async def start(self):
         await self.client.connect()
         reply = await self.client.request('register', tool=self.tool, name=self.name,
-                                          delivery=self.delivery, session_id=f'session-{self.name}')
+                                          delivery=self.delivery, session_id=self.session_id)
         self.id = reply['id']
         return self
 

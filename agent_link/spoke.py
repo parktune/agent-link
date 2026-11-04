@@ -377,10 +377,14 @@ class Spoke:
         """One session per name and tool, on this host and on the others the hub reported.
 
         A Claude and a Codex session may share a name: `claude:<name>` and `codex:<name>` tell them apart.
-        The same session coming back (same ID, or this connection) keeps its name.
+        The same session coming back (same ID, or this connection) keeps its name. A registration with this
+        session's own session ID is this session even if another connection holds it (a stale or second MCP
+        server of the same session): it is taken over, not refused.
         """
         for agent in self.agents.values():
             if agent.name != name or agent.tool != tool or agent.conn is conn and conn is not None:
+                continue
+            if agent.id == identifier and session_id and agent.session_id == session_id:
                 continue
             same_session = agent.id == identifier and (not session_id or not agent.session_id
                                                         or agent.session_id == session_id)
@@ -415,8 +419,17 @@ class Spoke:
         self.presence_changed()
         return {'removed': identifier, 'was': 'open' if agent.conn else 'closed'}
 
-    def rename_agent(self, old, identifier):
+    def hand_over(self, agent, conn):
+        """Another connection takes over this registration: tell the one holding it, which stops registering."""
+        if agent.conn is not None and agent.conn is not conn:
+            old, agent.conn = agent.conn, None
+            old.agent = None
+            self.spawn(self._notify_withdrawn(old, 'taken over by another connection of the same session'))
+            self.log('agent_taken_over', agent=agent.id)
+
+    def rename_agent(self, old, identifier, conn=None):
         from .box import move_box, stop_waiter
+        self.hand_over(old, conn)
         self.agents.pop(old.id, None)
         self.store.forget_agent(old.id)
         stop_waiter(self.box.folder(old.id))  # the Claude hook looks the session up again and waits on the new box
@@ -481,14 +494,17 @@ class Spoke:
         self.check_name_free(tool, name, identifier, text['session_id'], conn, continues)
         if conn.agent and conn.agent.id != identifier and conn.agent.conn is conn:
             conn.agent.conn = None  # renaming this session
-        earlier = [a.last_message for a in [self.agents.get(identifier)] if a]
+        existing = self.agents.get(identifier)
+        if existing:
+            self.hand_over(existing, conn)
+        earlier = [existing.last_message] if existing else []
         if text['session_id']:
             # The session ID, not the name, says which session this is: after a /rename the old
             # registration and its mailbox move to the new name instead of staying behind as a closed session.
             for old in [a for a in self.agents.values() if a.tool == tool and a.id != identifier
                         and (a.session_id == text['session_id'] or a.conn is None and a.session_id in continues)]:
                 earlier.append(old.last_message)
-                self.rename_agent(old, identifier)
+                self.rename_agent(old, identifier, conn)
         agent = Agent(identifier, self.host, tool, name, delivery=delivery, conn=conn, **text)
         if earlier:
             agent.last_message = max(earlier)  # reopening a session is not message traffic

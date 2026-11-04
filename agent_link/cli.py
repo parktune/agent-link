@@ -865,7 +865,12 @@ def open_claude(action=None, target=None, extra=()):
     elif action == 'continue':
         mode = ['--continue']
     elif action == 'resume' and target:
-        session = pick_session(find_claude_sessions(target), 'Claude', target)
+        renamed = {}
+        found = find_claude_sessions(target, renamed=renamed)
+        if not found and renamed:
+            raise SystemExit('; '.join(f'the Claude session once named "{target}" ({sid}) is now named "{now}": '
+                                       f'run `agent-link claude resume {now}`' for sid, now in renamed.items()))
+        session = pick_session(found, 'Claude', target)
         if session.get('continued_from'):
             say_err(f'{session["continued_from"]} was continued in {session["id"]} (Claude Code gives a session a new ID '
                     f'when it goes to the background); opening {session["id"]}')

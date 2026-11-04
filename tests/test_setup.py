@@ -236,6 +236,19 @@ class ResumeTests(unittest.TestCase):
             self.assertIn(f'was continued in {newer}', result.stderr)
             self.assertNotIn('also named', result.stderr)  # the copies are one conversation, not two sessions
 
+    def test_resume_finds_a_session_only_by_its_current_name(self):
+        original, later = '11111111-0000-0000-0000-00000000000a', '11111111-0000-0000-0000-00000000000b'
+        self.transcript(original, 'old-name', self.work, continued_in=[later])
+        self.transcript(later, 'new-name', self.work)  # continued under a new ID, then /rename new-name
+        result, ran = self.run_cli('--resume', 'old-name')
+        self.assertEqual((result.returncode, ran), (1, None))
+        self.assertIn('is now named "new-name"', result.stderr)
+        self.assertIn('agent-link claude resume new-name', result.stderr)
+        result, ran = self.run_cli('--resume', 'new-name')
+        self.assertEqual(ran['argv'][-2:], ['--resume', later])
+        result, ran = self.run_cli('--resume', original)  # an ID still finds it
+        self.assertEqual(ran['argv'][-2:], ['--resume', later])
+
     def test_resume_attaches_to_a_background_session_instead_of_forking_it(self):
         sid = '11111111-2222-3333-4444-555555555555'
         self.transcript(sid, 'project-head', self.work)

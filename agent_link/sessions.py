@@ -216,7 +216,15 @@ def claude_background_sessions():
             if isinstance(a, dict) and a.get('kind') == 'background' and a.get('sessionId')}
 
 
-def find_claude_sessions(name, config_dir=None):
+COPY_SUFFIX = re.compile(r' \(\d+\)$')
+
+
+def same_session_name(title, name):
+    """A copy Claude Code makes when a session goes to the background is titled "<name> (2)": the same name."""
+    return bool(title) and (title == name or COPY_SUFFIX.sub('', title) == name)
+
+
+def find_claude_sessions(name, config_dir=None, renamed=None):
     """Claude Code sessions to resume for `name`, newest first: [{'id', 'cwd', 'mtime'[, 'continued_from']}].
 
     `name` is the /rename title (the latest one counts) or a session ID. The working folder comes from
@@ -224,6 +232,8 @@ def find_claude_sessions(name, config_dir=None):
     A session Claude Code continued under a new ID (it does so when the session goes to the background)
     resolves to its newest continuation, which then carries 'continued_from'. Resuming the old ID
     instead would reopen the conversation as it was before, and backgrounding it again makes one more copy.
+    A name matches only the session's current name, the latest title of its newest continuation: a session
+    renamed since is not found under its old name, and `renamed` (a dict) gets {session ID: current name}.
     """
     root = Path(config_dir or os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude') / 'projects'
     # A session ID first (names can look like IDs, e.g. `agent-link-test`), then the /rename title.
@@ -241,6 +251,12 @@ def find_claude_sessions(name, config_dir=None):
         if needles and claude_session_name(path.stem, config_dir) != name:
             continue
         latest = _claude_latest_continuation(root, path)
+        if needles and latest != path:
+            current = claude_session_name(latest.stem, config_dir) or name  # no title of its own: it keeps the name
+            if not same_session_name(current, name):
+                if renamed is not None:
+                    renamed[latest.stem] = current
+                continue
         entry = _claude_entry(latest)
         if entry is None:
             continue

@@ -407,7 +407,7 @@ class RemoveTests(Environment):
         a = await self.session('gpu1', 'claude', 'alpha')
         await self.session('gpu1', 'claude', 'head')
         with self.assertRaisesRegex(Exception, 'name_taken'):
-            await self.session('gpu1', 'claude', 'head')
+            await self.session('gpu1', 'claude', 'head', session_id='another-session')
         await self.session('gpu1', 'codex', 'head')  # another tool may share the name
         with self.assertRaisesRegex(Exception, 'ambiguous.*claude:head or codex:head'):
             await a.send('head', 'x')
@@ -421,10 +421,11 @@ class RemoveTests(Environment):
         await self.connected('gpu2')
         await until(lambda: any(a['id'] == 'gpu1:claude:head' for a in self.spokes['gpu2'].directory))
         with self.assertRaisesRegex(Exception, 'name_taken.*gpu1:claude:head'):
-            await self.session('gpu2', 'claude', 'head')
+            await self.session('gpu2', 'claude', 'head', session_id='another-session')
         with self.assertRaisesRegex(Exception, 'name_taken'):
-            await self.session('local', 'claude', 'head')  # the hub knows every host
+            await self.session('local', 'claude', 'head', session_id='another-session')  # the hub knows every host
         await self.session('gpu2', 'codex', 'head')  # another tool may share the name
+        await until(lambda: any(a['id'] == 'gpu2:codex:head' for a in self.hub.presence.get('gpu2', [])))
         with self.assertRaisesRegex(Exception, 'ambiguous'):
             await main.send('head', 'x')
         self.assertEqual((await main.send('codex:head', 'x'))['route'], 'hub')
@@ -474,6 +475,21 @@ class RemoveTests(Environment):
         self.assertEqual({a['id'] for a in spoke.store.known_agents()}, set(spoke.agents))
         self.assertEqual((spoke.config.offline_expiry_days, spoke.config.idle_expiry_days), (15, 15))
         self.assertIsNone(spoke.lookup('session-quiet'))  # nothing kept: registering again is up to the user
+
+    async def test_a_second_connection_of_the_same_session_takes_the_registration_over(self):
+        spoke = await self.server('gpu1')
+        stale = await self.session('gpu1', 'claude', 'head', session_id='sid-1')
+        withdrawn = []
+        stale.client.on_withdrawn = withdrawn.append
+        live = await self.session('gpu1', 'claude', 'head', session_id='sid-1')  # same session ID: not name_taken
+        self.assertIs(spoke.agents['gpu1:claude:head'].conn.agent, spoke.agents['gpu1:claude:head'])
+        await until(lambda: withdrawn)  # the stale one is told, so it stops registering again
+        peer = await self.session('gpu1', 'claude', 'peer')
+        self.assertEqual((await peer.send('head', 'hi'))['status'], 'delivered')
+        self.assertEqual([m['content'] for m in live.received], ['hi'])
+        self.assertEqual(stale.received, [])
+        with self.assertRaisesRegex(Exception, 'name_taken'):  # another session still may not take the name
+            await self.session('gpu1', 'claude', 'head', session_id='sid-2')
 
     async def test_reopening_a_session_does_not_count_as_message_traffic(self):
         spoke = await self.server('gpu1')
