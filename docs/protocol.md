@@ -44,7 +44,7 @@ hub가 다시 시작하거나 절전에서 복귀해도 중복 전달이 없다.
 
 | 요청 | 응답 | 설명 |
 |---|---|---|
-| `register {tool, name, cwd, session_id, delivery}` | `registered {id, host, box}` | delivery: `push` 또는 `box` |
+| `register {tool, name, cwd, session_id, delivery[, continues]}` | `registered {id, host, box}` | delivery: `push` 또는 `box`. `continues`: 이 세션이 이어받은 옛 세션 ID들(Claude `continued-in`). 그 ID의 닫힌 등록은 이름을 넘겨준다 (0.11) |
 | `lookup {session_id}` | `lookup {agent}` | 같은 세션의 MCP 프로세스가 다시 시작되면 이전 등록을 찾는다 |
 | `send {to, content, type, in_reply_to}` | `sent {id, status, route}` | route: `local`(같은 호스트), `hub`. status에 `queued`(hub 미연결)가 추가된다 |
 | `receive {limit}` | `messages {messages, box}` | 박스의 안 읽은 메시지. 읽은 파일은 `read/`로 옮긴다 |

@@ -373,7 +373,7 @@ class Spoke:
             return {'op': 'ok'}
         raise ProtocolError('unauthorized', f'unknown operation {op}')
 
-    def check_name_free(self, tool, name, identifier, session_id, conn):
+    def check_name_free(self, tool, name, identifier, session_id, conn, continues=frozenset()):
         """One session per name and tool, on this host and on the others the hub reported.
 
         A Claude and a Codex session may share a name: `claude:<name>` and `codex:<name>` tell them apart.
@@ -386,6 +386,8 @@ class Spoke:
                                                         or agent.session_id == session_id)
             if same_session and not (agent.conn and agent.conn is not conn):
                 continue
+            if agent.conn is None and agent.session_id in continues:
+                continue  # a closed session this one continues (Claude Code gave it a new ID): it takes the name over
             state = 'open' if agent.conn else 'closed'
             raise ProtocolError('name_taken', f'"{name}" is already used by {agent.id} ({state}). Rename this session '
                                 f'(/rename), or free the name with `agent-link unregister {agent.id}`.')
@@ -474,15 +476,17 @@ class Spoke:
         if delivery not in ('push', 'box'):
             raise ProtocolError('invalid', 'delivery must be push or box')
         text = {k: str(frame.get(k) or '')[:256] for k in ('cwd', 'session_id')}
-        self.check_name_free(tool, name, identifier, text['session_id'], conn)
+        continues = frame.get('continues') or []
+        continues = {c for c in continues[:20] if isinstance(c, str) and c} if isinstance(continues, list) else set()
+        self.check_name_free(tool, name, identifier, text['session_id'], conn, continues)
         if conn.agent and conn.agent.id != identifier and conn.agent.conn is conn:
             conn.agent.conn = None  # renaming this session
         earlier = [a.last_message for a in [self.agents.get(identifier)] if a]
         if text['session_id']:
             # The session ID, not the name, says which session this is: after a /rename the old
             # registration and its mailbox move to the new name instead of staying behind as a closed session.
-            for old in [a for a in self.agents.values() if a.session_id == text['session_id'] and a.tool == tool
-                        and a.id != identifier]:
+            for old in [a for a in self.agents.values() if a.tool == tool and a.id != identifier
+                        and (a.session_id == text['session_id'] or a.conn is None and a.session_id in continues)]:
                 earlier.append(old.last_message)
                 self.rename_agent(old, identifier)
         agent = Agent(identifier, self.host, tool, name, delivery=delivery, conn=conn, **text)

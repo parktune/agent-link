@@ -13,6 +13,10 @@ import sys
 EVENTS = ('SessionStart', 'Stop')
 MARK = 'wait-box --hook'
 TIMEOUT = 7 * 24 * 3600  # Claude Code kills a hook at its timeout without a word; the next Stop starts it again
+# What the user sees when the hook wakes the session (Claude Code's default is "Stop hook feedback"), and the
+# prefix the model gets before the hook's text (default: "Stop hook blocking error from command ...").
+SUMMARY = 'agent-link: new message'
+PREFIX = 'agent-link mailbox (not an error):'
 
 
 def settings_path():
@@ -43,7 +47,12 @@ def installed(path=None):
         hooks = _load(path or settings_path()).get('hooks') or {}
     except (OSError, ValueError):
         return False
-    return all(any(_ours(e) for e in hooks.get(event) or [] if isinstance(e, dict)) for event in EVENTS)
+    return all(any(_ours(e) and _current(e) for e in hooks.get(event) or [] if isinstance(e, dict)) for event in EVENTS)
+
+
+def _current(entry):
+    """Installed by this version (an older entry lacks the notice text and shows "Stop hook feedback")."""
+    return any(hook.get('rewakeSummary') == SUMMARY for hook in entry.get('hooks') or [] if isinstance(hook, dict))
 
 
 def install(path=None, python=None, remove=False):
@@ -57,8 +66,8 @@ def install(path=None, python=None, remove=False):
     for event in EVENTS:
         entries = [e for e in hooks.get(event) or [] if not (isinstance(e, dict) and _ours(e))]
         if not remove:
-            entries.append({'hooks': [{'type': 'command', 'command': hook_command(python),
-                                       'asyncRewake': True, 'timeout': TIMEOUT}]})
+            entries.append({'hooks': [{'type': 'command', 'command': hook_command(python), 'asyncRewake': True,
+                                       'timeout': TIMEOUT, 'rewakeSummary': SUMMARY, 'rewakeMessage': PREFIX}]})
         if entries:
             hooks[event] = entries
         else:

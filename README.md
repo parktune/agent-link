@@ -70,7 +70,7 @@ $agent-link trainer 체크포인트 경로 알려줘
 - **`register`:** 그 이름으로 새 세션을 만들어 열고 바로 등록합니다. Codex 세션은 Codex app-server(`codex queue`가 쓰는 백그라운드 서비스)로 이름 붙은 세션을 만든 뒤 엽니다. 같은 종류의 세션이 이미 그 이름을 쓰고 있으면 거부하고 `resume`을 안내합니다.
 - **자동 해제:** 닫힌 세션은 15일 동안 열리지 않았거나, 15일 동안 메시지를 보내거나 받지 않았으면 등록이 해제됩니다. 열려 있는 세션은 해제하지 않습니다. 해제된 세션은 기록이 남지 않으므로, 다시 쓰려면 `register`·`resume`으로 열거나 세션에서 `/agent-link`로 직접 등록합니다.
 - **`resume` 옵션:** 이름 대신 세션 ID도 됩니다. `resume`만 쓰면 고르기 화면, `continue`(Codex는 `last`)는 지금 폴더의 최근 대화입니다. CLI에 넘길 인자는 `--` 뒤에 씁니다(`agent-link claude resume project-head -- --model opus`).
-- **백그라운드로 보낸 Claude 세션:** Claude Code 는 세션을 백그라운드로 보낼 때 새 ID로 이어 씁니다. `agent-link claude resume <이름|옛 ID>` 는 그 이어진 최신 세션을 엽니다. 그 세션이 아직 백그라운드에서 돌고 있으면 사본이 또 생기지 않도록 열지 않고 `claude attach <ID>`(또는 `claude stop <ID>` 뒤 다시 실행)를 안내합니다. 이름 없이 `resume`만 쓰는 고르기 화면은 Claude Code 것이라 옛 ID도 그대로 보입니다.
+- **백그라운드로 보낸 Claude 세션:** Claude Code 는 세션을 백그라운드로 보낼 때 새 ID로 이어 씁니다. `agent-link claude resume <이름|옛 ID>` 는 그 이어진 최신 세션을 엽니다. 그 세션이 백그라운드 세션이면(멈춘 것 포함) `--resume` 대신 `claude attach <ID>`로 열어 사본이 또 생기지 않게 합니다. 새 ID로 이어진 세션은 옛 ID의 닫힌 등록을 이름과 박스째 넘겨받습니다(세션 기록의 `continued-in`으로 확인). 이름 없이 `resume`만 쓰는 고르기 화면은 Claude Code 것이라 옛 ID도 그대로 보입니다.
 - **비동기:** 보낸 세션은 기다리지 않고 하던 일을 계속하며, 회신은 나중에 도착합니다. 서버 세션도 다른 머신의 세션을 이름으로 부를 수 있습니다.
 - **무한 핑퐁 방지:** 회신에 다시 회신하는 것은 거부됩니다.
 
@@ -83,7 +83,7 @@ $agent-link trainer 체크포인트 경로 알려줘
 | Codex | `agent-link codex resume`으로 열면 `codex queue`로 그 대화에 넣음. 안 되면 박스에 쌓이고 `$agent-link`로 확인 |
 | 닫혀 있는 세션 | 박스에 저장, 다음에 열었을 때 확인 |
 
-Channels가 막힌 Claude 세션은 hook이 깨웁니다. Claude Code가 세션 시작과 매 턴 끝에 `agent-link wait-box --hook`을 백그라운드로 띄우고, 새 메일이 오면 그 hook이 메시지 내용을 담아 끝나면서 세션이 깨어나고, 세션은 메시지마다 `from <보낸 세션> (<종류>): <내용>` 한 줄을 대화에 보여 줍니다. agent-link에 박스로 등록된 세션이 아니면 hook은 바로 끝납니다. 같은 메일로 두 번 깨우지 않습니다.
+Channels가 막힌 Claude 세션은 hook이 깨웁니다. Claude Code가 세션 시작과 매 턴 끝에 `agent-link wait-box --hook`을 백그라운드로 띄우고, 새 메일이 오면 그 hook이 메시지 내용을 담아 끝나면서 세션이 깨어납니다. 화면에는 `agent-link: new message`가 뜨고, 세션은 메시지마다 `from <보낸 세션> (<종류>): <내용>` 한 줄을 보여 줍니다(짧은 메시지는 원문 그대로). Channels로 받는 세션은 Claude Code가 `← agent-link: from <보낸 세션> (<종류>): <내용>`을 직접 보여 주므로 세션이 다시 쓰지 않습니다. agent-link에 박스로 등록된 세션이 아니면 hook은 바로 끝납니다. 같은 메일로 두 번 깨우지 않습니다.
 
 박스는 로컬 PC `<repo>/hub/<tool>-<name>/received/`, 서버 `<repo>/spoke/<tool>-<name>/received/`에 메시지 1건당 Markdown 파일 1개로 쌓입니다.
 

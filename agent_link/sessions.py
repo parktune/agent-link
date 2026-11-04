@@ -160,6 +160,36 @@ def _claude_latest_continuation(root, path):
             return path
 
 
+def claude_ancestors(session_id, config_dir=None, limit=20):
+    """Session IDs this Claude session continues, nearest first: the sessions whose transcripts say
+    `continued-in` this one (Claude Code moves a session to a new ID when it goes to the background).
+    """
+    if not session_id or not SESSION_ID.fullmatch(session_id):
+        return []
+    root = Path(config_dir or os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude') / 'projects'
+    transcripts = list(root.glob('*/*.jsonl'))
+    chain, current = [], session_id
+    while len(chain) < limit:
+        parent = None
+        for path in transcripts:
+            if path.stem == current or path.stem in chain:
+                continue
+            data = _transcript(path, [b'"continued-in"', current.encode()])
+            if data is None:
+                continue
+            try:
+                if current in _claude_continued_in(data):
+                    parent = path.stem
+                    break
+            finally:
+                data.close()
+        if parent is None:
+            return chain
+        chain.append(parent)
+        current = parent
+    return chain
+
+
 def _claude_entry(path):
     data = _transcript(path, [])
     if data is None:
@@ -173,10 +203,11 @@ def _claude_entry(path):
 
 
 def claude_background_sessions():
-    """Session IDs Claude Code is running in the background now (`claude agents --json`); empty if unknown."""
+    """Session IDs Claude Code keeps as background sessions, running or stopped (`claude agents --json --all`);
+    empty if unknown."""
     import subprocess
     try:
-        out = subprocess.run(['claude', 'agents', '--json'], capture_output=True, text=True, timeout=15).stdout
+        out = subprocess.run(['claude', 'agents', '--json', '--all'], capture_output=True, text=True, timeout=15).stdout
         agents = json.loads(out)
     except (OSError, subprocess.SubprocessError, ValueError):
         return set()

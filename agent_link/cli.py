@@ -471,8 +471,9 @@ def hook_wake_text(box):
         blocks.append(codex_envelope({**message, 'in_reply_to': message.get('in_reply_to') or None}))
     head = (f'agent-link: {len(messages)} new message(s) for this session' +
             (f'; {left} more unread in the mailbox, read them with check_box' if left else '') +
-            '. Show each to the user as one line "from <sender> (<type>): <the message, or a one-line summary '
-            'if it is long>", then handle it as the agent-link skill says (section 4).')
+            '. The user sees only a short notice of this, so show each to the user as one line "from <sender> '
+            '(<type>): <the message word for word if it is short, else a one-line summary>", then handle it as the '
+            'agent-link skill says (section 4).')
     return '\n\n'.join([head, *blocks])
 
 
@@ -869,9 +870,10 @@ def open_claude(action=None, target=None, extra=()):
             say_err(f'{session["continued_from"]} was continued in {session["id"]} (Claude Code gives a session a new ID '
                     f'when it goes to the background); opening {session["id"]}')
         if session['id'] in claude_background_sessions():
-            raise SystemExit(f'"{target}" ({session["id"]}) is running in the background; opening it here would make '
-                             f'another copy. Use `claude attach {session["id"]}`, or `claude stop {session["id"]}` '
-                             f'and run this again.')
+            # `--resume` would fork it into another copy under a new ID; attach opens the background session itself.
+            # Its agent-link MCP server is already running there and keeps (or takes over) the registration.
+            say_err(f'"{target}" ({session["id"]}) is a background session; attaching to it')
+            return launch(['claude', 'attach', session['id']])
         mode = ['--resume', session['id']]
     else:
         mode = ['--resume'] if picker else []

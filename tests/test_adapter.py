@@ -69,6 +69,7 @@ class InjectTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(key.replace('_', '').isalnum() for key in params['meta']))
         self.assertEqual(params['meta']['in_reply_to'], message['in_reply_to'])
         self.assertIn('Do not answer', codex_envelope(message))
+        self.assertEqual(params['content'], 'from gpu1:claude:head (reply): 보고')
 
     async def test_codex_queue_argv(self):
         with tempfile.TemporaryDirectory() as root:
@@ -364,7 +365,14 @@ class ClaudeHookTests(unittest.TestCase):
                 self.assertEqual(len(ours), 1)
                 self.assertEqual((ours[0]['asyncRewake'], ours[0]['command'].split()[0]), (True, '/new/python'))
                 self.assertGreaterEqual(ours[0]['timeout'], 86400)
+                self.assertEqual(ours[0]['rewakeSummary'], 'agent-link: new message')  # not "Stop hook feedback"
             self.assertTrue(claude_hooks.installed(path))
+            stale = json.loads(path.read_text())
+            for entry in stale['hooks']['Stop']:
+                for hook in entry['hooks']:
+                    hook.pop('rewakeSummary', None)
+            path.write_text(json.dumps(stale))
+            self.assertFalse(claude_hooks.installed(path))  # an older install: setup.sh puts the notice in
             claude_hooks.install(path, remove=True)
             self.assertEqual(json.loads(path.read_text()), {'model': 'opus', 'hooks': {'Stop': [other]}})
 
@@ -417,7 +425,7 @@ class StdioTests(Environment):
             self.assertEqual((await sender.send('head', '안녕'))['status'], 'delivered')
             await until(lambda: any(m.get('method') == 'notifications/claude/channel' for m in lines))
             note = next(m for m in lines if m.get('method') == 'notifications/claude/channel')
-            self.assertEqual(note['params']['content'], '안녕')
+            self.assertEqual(note['params']['content'], 'from gpu1:claude:alpha (request): 안녕')  # shown as ← agent-link: ...
             self.assertEqual(note['params']['meta']['from'], 'gpu1:claude:alpha')
         finally:
             process.stdin.close()
@@ -537,6 +545,53 @@ class SessionNameTests(Environment):
             await asyncio.gather(task, return_exceptions=True)
             await adapter.client.close()
             del os.environ['CLAUDE_CODE_SESSION_ID'], os.environ['CLAUDE_CONFIG_DIR']
+
+
+    async def test_a_continued_session_takes_over_the_closed_registration(self):
+        await self.server('gpu1')
+        first, second = '11111111-0000-0000-0000-00000000000a', '11111111-0000-0000-0000-00000000000b'
+        self.write(self.root / 'claude/projects/p' / f'{first}.jsonl', [
+            {'type': 'custom-title', 'customTitle': 'worker'},
+            {'type': 'continued-in', 'continuedInSessionId': second}])
+        self.write(self.root / 'claude/projects/p' / f'{second}.jsonl', [
+            {'type': 'custom-title', 'customTitle': 'worker (2)'}])  # the copy Claude Code makes in the background
+        os.environ['CLAUDE_CONFIG_DIR'] = str(self.root / 'claude')
+        spoke = self.spokes['gpu1']
+        try:
+            with mock.patch.dict(os.environ, {'CLAUDE_CODE_SESSION_ID': first}):
+                old = Adapter('claude', self.root / 'gpu1/s.sock', channel=False)
+            task = asyncio.create_task(old.run())
+            await until(lambda: old.client.connected)
+            await old.call('register', {})
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await old.client.close()
+            await until(lambda: spoke.agents['gpu1:claude:worker'].conn is None)
+            peer = await self.session('gpu1', 'claude', 'peer')
+            await peer.send('worker', 'while it was closed')
+
+            with mock.patch.dict(os.environ, {'CLAUDE_CODE_SESSION_ID': second}):
+                new = Adapter('claude', self.root / 'gpu1/s.sock', channel=False)
+            task = asyncio.create_task(new.run())
+            await until(lambda: new.identity is not None)
+            await new.follow_rename()
+            me = new.whoami()
+            self.assertEqual(me['id'], 'gpu1:claude:worker')
+            self.assertNotIn('rename_error', me)  # "worker (2)" is the same session, not a rename
+            self.assertEqual(spoke.lookup(second)['name'], 'worker')
+            self.assertEqual([m['content'] for m in (await new.call('check_box', {}))['messages']], ['while it was closed'])
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await new.client.close()
+
+            # An unrelated session may not take the name of a closed one.
+            stranger = await self.session('gpu1', 'claude', 'worker')
+        except Exception as error:
+            self.assertIn('name_taken', str(error))
+        else:
+            self.fail('a stranger took the name')
+        finally:
+            del os.environ['CLAUDE_CONFIG_DIR']
 
 
 class LaunchRegisterTests(Environment):

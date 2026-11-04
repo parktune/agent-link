@@ -231,13 +231,14 @@ class ResumeTests(unittest.TestCase):
             self.assertIn(f'was continued in {newer}', result.stderr)
             self.assertNotIn('also named', result.stderr)  # the copies are one conversation, not two sessions
 
-    def test_resume_refuses_a_session_running_in_the_background(self):
+    def test_resume_attaches_to_a_background_session_instead_of_forking_it(self):
         sid = '11111111-2222-3333-4444-555555555555'
         self.transcript(sid, 'project-head', self.work)
         (self.root / 'agents.json').write_text(json.dumps([{'sessionId': sid, 'name': 'project-head', 'kind': 'background'}]))
         result, ran = self.run_cli('--resume', 'project-head')
-        self.assertEqual((result.returncode, ran), (1, None))
-        self.assertIn(f'claude attach {sid}', result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(ran['argv'], ['attach', sid])
+        self.assertIn('attaching', result.stderr)
         (self.root / 'agents.json').write_text(json.dumps([{'sessionId': sid, 'kind': 'interactive'}]))
         result, ran = self.run_cli('--resume', 'project-head')
         self.assertEqual(ran['argv'][-2:], ['--resume', sid])
