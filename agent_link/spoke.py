@@ -690,7 +690,10 @@ def directory_entries(agents, exclude_host=None):
         except ProtocolError:
             continue
         if host and host == agent.get('host') and tool == agent.get('tool') and name == agent.get('name'):
-            entries.append({k: agent.get(k) for k in DIRECTORY_FIELDS})
+            entry = {k: agent.get(k) for k in DIRECTORY_FIELDS}
+            if agent.get('reachable') is False:
+                entry['reachable'] = False  # its host is not connected to the hub (agent-link unregister --offline skips it)
+            entries.append(entry)
     return entries[:2000]
 
 

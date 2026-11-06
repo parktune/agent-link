@@ -1,2 +1,2 @@
 """agent-link: hub-and-spoke messaging between Claude Code and Codex sessions."""
-__version__ = '0.12.0'
+__version__ = '0.13.0'

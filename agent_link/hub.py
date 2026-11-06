@@ -363,7 +363,7 @@ class Hub:
 
     def host_offline(self, host):
         for agent in self.presence.get(host, []):
-            agent['status'] = 'offline'
+            agent['status'], agent['reachable'] = 'offline', False  # its host is down, not just the session closed
         self.publish_directory()
 
     def publish_directory(self):

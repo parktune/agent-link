@@ -451,6 +451,36 @@ class RemoveTests(Environment):
         await until(lambda: len([a for a in self.hub.all_agents() if a['name'] == 'head']) == 1)
         self.assertEqual((await self.ask('local', 'remove', target='head'))['removed'], 'gpu1:claude:head')
 
+    async def test_unregister_offline_takes_closed_sessions_of_connected_hosts_only(self):
+        from agent_link.cli import offline_sessions
+        await self.setup_hosts()
+        await self.session('local', 'claude', 'main')
+        await self.session('gpu1', 'claude', 'head')
+        closed = [await self.session('local', 'claude', 'old'), await self.session('gpu1', 'codex', 'stale'),
+                  await self.session('gpu2', 'claude', 'gone')]
+        for session in closed:
+            await session.stop()
+            self.sessions.remove(session)
+        await self.connected('gpu1')
+        await self.connected('gpu2')
+        await until(lambda: not any(a['status'] == 'online' for a in self.hub.presence.get('gpu2', [])))
+        self.hub.host_offline('gpu2')  # gpu2 drops off: its sessions cannot be reached to unregister
+        await until(lambda: any(a.get('reachable') is False for a in self.spokes['gpu1'].directory))
+        info = await self.ask('local', 'status')
+        self.assertEqual(offline_sessions(info), (['gpu1:codex:stale', 'local:claude:old'], ['gpu2']))
+        self.assertEqual(offline_sessions(info, 'gpu1'), (['gpu1:codex:stale'], []))
+        spoke = self.spokes['gpu1']
+        from_server = {'role': 'spoke', 'host': 'gpu1', 'hub_connected': True,
+                       'agents': [a.public() for a in spoke.agents.values()], 'others': spoke.directory}
+        self.assertEqual(offline_sessions(from_server), (['gpu1:codex:stale', 'local:claude:old'], ['gpu2']))
+        self.assertEqual(offline_sessions({**from_server, 'hub_connected': False}),
+                         (['gpu1:codex:stale'], ['gpu2', 'local']))  # without the hub: only this server
+        for identifier in offline_sessions(info)[0]:
+            await self.ask('local', 'remove', target=identifier)
+        await until(lambda: 'gpu1:codex:stale' not in spoke.agents)
+        self.assertEqual(sorted(self.hub.local.agents), ['local:claude:main'])
+        self.assertEqual(offline_sessions(await self.ask('local', 'status'))[0], [])
+
     async def test_remove_by_name_from_any_machine(self):
         await self.setup_hosts()
         main = await self.session('local', 'claude', 'main')

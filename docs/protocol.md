@@ -23,7 +23,7 @@
 | hub → host | `deliver {msg}` | 응답 `delivered {id, status}` 또는 `error {id, code}`. status: `delivered`, `stored`, `stored_offline` |
 | hub → host | `ack {seq, result?}` | outbox를 `seq`까지 처리했다는 뜻이다. `result`는 그 메시지의 라우팅 결과(`{id, status}` 또는 `{id, error}`)이며, 기다리고 있는 보낸 세션에 전달한다 |
 | hub → host | `ping` | 응답 `pong` (명세 추가 사항) |
-| hub → host | `directory {agents[]}` | 다른 호스트의 에이전트 목록(id, host, tool, name, status, delivery). 바뀔 때 보낸다. `hello_ok`의 `caps`에 `directory`가 있는 서버에만 보낸다 (명세 추가 사항, 0.6.5) |
+| hub → host | `directory {agents[]}` | 다른 호스트의 에이전트 목록(id, host, tool, name, status, delivery, 서버 연결이 끊겼으면 `reachable: false`). 바뀔 때 보낸다. `hello_ok`의 `caps`에 `directory`가 있는 서버에만 보낸다 (명세 추가 사항, 0.6.5) |
 | hub → host | `forget {id}` | 그 호스트의 세션 등록을 지운다(`agent-link unregister`). `caps`에 `forget`이 있는 서버에만 보낸다 (0.7.3) |
 | host → hub | `outbox {seq, msg}` / `outbox {seq, remove}` | 세션이 hub로 올린 메시지(회신 등), 또는 다른 호스트 세션의 삭제 요청 `{target}` |
 | host → hub | `presence {agents[]}` | 변화가 있을 때와 30초마다 |

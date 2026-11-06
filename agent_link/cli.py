@@ -238,6 +238,63 @@ def confirm(question):
         return False
 
 
+def offline_sessions(info, only_host=None):
+    """Closed sessions that can be unregistered now, and the hosts skipped because they are not connected.
+
+    `info` is the `status` reply. On the hub every host is known with its connection; on a server the other hosts
+    come from the hub's directory, which marks the sessions of disconnected hosts `reachable: false`, and nothing
+    beyond this server is touched while the hub itself is out of reach.
+    """
+    if info.get('role') == 'hub':
+        connected = {h['name'] for h in info.get('hosts') or [] if h.get('connected')} | {info.get('host')}
+        agents = info.get('agents') or []
+    else:
+        connected = {info.get('host')}
+        agents = list(info.get('agents') or [])
+        if info.get('hub_connected'):
+            agents += info.get('others') or []
+            connected |= {a.get('host') for a in agents if a.get('reachable') is not False}
+        else:
+            agents += [a for a in info.get('others') or [] if a.get('host') != info.get('host')]
+    closed, skipped = [], set()
+    for agent in agents:
+        if agent.get('status') == 'online' or (only_host and agent.get('host') != only_host):
+            continue
+        if agent.get('host') in connected and agent.get('reachable') is not False:
+            closed.append(agent['id'])
+        else:
+            skipped.add(agent.get('host'))
+    return sorted(closed), sorted(h for h in skipped if h)
+
+
+def unregister_offline(args):
+    info = asyncio.run(ask(default_socket(), 'status'))
+    closed, skipped = offline_sessions(info, args.host)
+    for host in skipped:
+        reason = 'not connected' if info.get('role') == 'hub' or info.get('hub_connected') else 'the hub is not reachable'
+        print(f'{host}: {reason}, skipped')
+    if not closed:
+        print('no closed sessions to unregister' + (f' on {args.host}' if args.host else ''))
+        return 0
+    print(f'{len(closed)} closed session(s):')
+    for identifier in closed:
+        print(f'  {identifier}')
+    if args.dry_run:
+        return 0
+    if not args.yes and not confirm(f'Unregister these {len(closed)} session(s)?'):
+        print('nothing unregistered')
+        return 1
+    failed = 0
+    for identifier in closed:
+        try:
+            reply = asyncio.run(ask(default_socket(), 'remove', target=identifier))
+            print(f'unregistered {reply["removed"]} ({reply.get("was", "")})')
+        except ProtocolError as error:
+            failed += 1
+            print(f'{identifier}: {error.code}: {error.detail}')
+    return 1 if failed else 0
+
+
 def discover_hosts(args, store):
     from .discover import pick, ssh_hosts
     hosts = ssh_hosts(args.ssh_config)
@@ -592,7 +649,12 @@ def build_parser():
     commands.add_parser('endpoint', help='Server: SSH forced command the hub runs').add_argument('--socket', type=Path)
     commands.add_parser('revoke', help='Server: delete the hub peer token and drop the hub connection')
     unregister = commands.add_parser('unregister', help='Unregister a session, on whatever host it lives')
-    unregister.add_argument('session', help='Its name, tool:name or full host:tool:name ID (e.g. local:claude:main); refused with the candidates when several match')
+    unregister.add_argument('session', nargs='?', help='Its name, tool:name or full host:tool:name ID (e.g. local:claude:main); refused with the candidates when several match')
+    unregister.add_argument('--offline', action='store_true', help='Every closed session on a connected host, after a [y/N] '
+                            'confirmation (sessions on servers that are not connected are skipped)')
+    unregister.add_argument('--host', help='With --offline: only this host (e.g. local or gpu-server-1)')
+    unregister.add_argument('--yes', '-y', action='store_true', help='With --offline: do not ask for confirmation')
+    unregister.add_argument('--dry-run', action='store_true', help='With --offline: only list the sessions')
     update = commands.add_parser('update', help='git pull + setup.sh + restart here; on the hub PC also every server')
     update.add_argument('--hosts', help='On the hub PC: only these servers (comma-separated names or aliases)')
     update.add_argument('--local-only', action='store_true', help='Only this machine, not the servers')
@@ -993,8 +1055,14 @@ def agent_link(argv=None):
     if args.command == 'update':
         return run_update(args)
     if args.command == 'unregister':
+        if bool(args.session) == args.offline:
+            parser.error('unregister takes either a SESSION or --offline')
+        if not args.offline and (args.host or args.yes or args.dry_run):
+            parser.error('--host, --yes and --dry-run go with --offline')
         if not service.alive():
             raise SystemExit('agent-link is not running on this machine (agent-link hub up / agent-link up)')
+        if args.offline:
+            return unregister_offline(args)
         try:
             reply = asyncio.run(ask(default_socket(), 'remove', target=args.session))
         except ProtocolError as error:
