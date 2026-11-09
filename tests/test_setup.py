@@ -438,6 +438,7 @@ def send(obj):
     sys.stdout.flush()
 
 calls = []
+reads = 0
 while True:
     first = read(2)
     if len(first) < 2:
@@ -456,6 +457,10 @@ while True:
         send({'id': message['id'], 'error': {'message': 'name rejected'}})
     elif message['method'] == 'thread/start':
         send({'id': message['id'], 'result': {'thread': {'id': 'thread-1'}}})
+    elif message['method'] == 'thread/read':
+        reads += 1
+        send({'id': message['id'], 'result': {'thread': {
+            'status': {'type': 'idle' if reads == 1 else 'notLoaded'}}}})
     else:
         send({'id': message['id'], 'result': {}})
 '''
@@ -471,10 +476,35 @@ class CodexAppTests(unittest.TestCase):
             fake.chmod(0o755)
             self.assertEqual(create_named_thread('trainer', '/work', executable=str(fake)), 'thread-1')
             calls = json.loads(log.read_text())
-            self.assertEqual([c['method'] for c in calls], ['initialize', 'initialized', 'thread/start', 'thread/name/set'])
-            self.assertEqual(calls[2]['params'], {'cwd': '/work'})
+            self.assertEqual([c['method'] for c in calls], ['initialize', 'initialized', 'thread/start',
+                             'thread/name/set', 'thread/unsubscribe', 'thread/read', 'thread/read'])
+            self.assertEqual(calls[2]['params'], {'cwd': '/work', 'config': {'thread_unload_delay_secs': 0}})
             self.assertEqual(calls[3]['params'], {'threadId': 'thread-1', 'name': 'trainer'})
+            self.assertEqual(calls[4]['params'], {'threadId': 'thread-1'})
             with self.assertRaisesRegex(CodexAppError, 'name rejected'):
                 create_named_thread('refused', '/work', executable=str(fake))
+            self.assertEqual([c['method'] for c in json.loads(log.read_text())][-3:],
+                             ['thread/unsubscribe', 'thread/read', 'thread/read'])
             with self.assertRaisesRegex(CodexAppError, 'codex app-server daemon start'):
                 create_named_thread('x', '/work', executable='false')
+
+    def test_release_times_out_if_thread_stays_loaded(self):
+        from unittest import mock
+        from agent_link.codex_app import AppServer, CodexAppError
+        server = object.__new__(AppServer)
+        server.timeout = 0
+        server.call = mock.Mock(return_value={'thread': {'status': {'type': 'idle'}}})
+        with self.assertRaisesRegex(CodexAppError, 'still loaded'):
+            server.release_thread('thread-1')
+
+    def test_read_times_out_if_server_stops_responding(self):
+        from agent_link.codex_app import AppServer, CodexAppError
+        server = object.__new__(AppServer)
+        server.timeout = 0.05
+        server.process = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(10)'],
+                                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            with self.assertRaisesRegex(CodexAppError, 'timed out'):
+                server._read(1)
+        finally:
+            server.close()

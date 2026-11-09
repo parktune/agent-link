@@ -14,6 +14,7 @@
 | M0-3 | `CLAUDE_CODE_SESSION_ID` | M0-1 세션에서 `/mcp`로 agent-link를 다시 연결한다 | 다시 묻지 않고 같은 이름으로 복구된다(주입될 때만) |
 | M0-4 | Codex `codex queue` 주입 | Codex를 열고 `$agent-link`를 한 번 써서 등록한다. 스킬이 `printenv CODEX_THREAD_ID`를 시도한다. 다른 세션에서 그 Codex로 보낸다 | Codex TUI에 `[agent-link] request ...` 메시지가 들어가 처리된다. 안 되면 `stored` + 박스 파일 |
 | M0-5 | Codex 스레드 미상 | `CODEX_THREAD_ID`가 비어 있으면 `/rename trainer` 후 이름으로 등록한다 | M0-4와 같다 |
+| M0-5a | Codex 새 스레드 점유 해제 | `agent-link codex register <새 이름>`을 실행한다 | 데몬에서 이름을 지정한 뒤 언로드를 확인하고 TUI가 즉시 열린다. 다른 앱에서 열려 있다는 오류가 없어야 한다. 자동 회귀 테스트: `CodexAppTests` |
 | M0-6 | 조직 정책 | Team/Enterprise 계정이면 M0-1에서 `blocked by org policy`가 나오는지 본다 | 나오면 관리자가 `channelsEnabled`를 켜야 한다. 그동안은 박스로 동작한다 |
 
 ## M2·M3·M4: 14장 시나리오

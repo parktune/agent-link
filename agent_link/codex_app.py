@@ -8,8 +8,10 @@ returns its ID, `thread/name/set` gives it the name (as /rename would). `codex r
 import base64
 import json
 import os
+import select
 import struct
 import subprocess
+import time
 
 
 class CodexAppError(RuntimeError):
@@ -21,16 +23,20 @@ class AppServer:
         self.process = subprocess.Popen([executable, 'app-server', 'proxy'], stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.timeout, self.next_id = timeout, 1
-        key = base64.b64encode(os.urandom(16)).decode()
-        self._write(f'GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
-                    f'Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n'.encode())
-        head = b''
-        while not head.endswith(b'\r\n\r\n'):
-            head += self._read(1)
-        if b' 101 ' not in head.split(b'\r\n', 1)[0]:
-            raise CodexAppError('the Codex app-server refused the connection: ' + head.split(b'\r\n', 1)[0].decode())
-        self.call('initialize', {'clientInfo': {'name': 'agent-link', 'version': '1'}})
-        self._send({'jsonrpc': '2.0', 'method': 'initialized'})
+        try:
+            key = base64.b64encode(os.urandom(16)).decode()
+            self._write(f'GET / HTTP/1.1\r\nHost: localhost\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+                        f'Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n'.encode())
+            head = b''
+            while not head.endswith(b'\r\n\r\n'):
+                head += self._read(1)
+            if b' 101 ' not in head.split(b'\r\n', 1)[0]:
+                raise CodexAppError('the Codex app-server refused the connection: ' + head.split(b'\r\n', 1)[0].decode())
+            self.call('initialize', {'clientInfo': {'name': 'agent-link', 'version': '1'}})
+            self._send({'jsonrpc': '2.0', 'method': 'initialized'})
+        except BaseException:
+            self.close()
+            raise
 
     def _write(self, data):
         try:
@@ -41,8 +47,12 @@ class AppServer:
 
     def _read(self, size):
         data = b''
+        deadline = time.monotonic() + self.timeout
         while len(data) < size:
-            chunk = self.process.stdout.read(size - len(data))
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([self.process.stdout], [], [], remaining)[0]:
+                raise CodexAppError('timed out waiting for the Codex app-server')
+            chunk = os.read(self.process.stdout.fileno(), size - len(data))
             if not chunk:
                 raise CodexAppError(self._failure())
             data += chunk
@@ -96,14 +106,36 @@ class AppServer:
     def close(self):
         self.process.kill()
         self.process.wait()
+        for stream in (self.process.stdin, self.process.stdout, self.process.stderr):
+            stream.close()
+
+    def release_thread(self, thread):
+        """Wait for the daemon to relinquish its writer lock before a CLI resumes it."""
+        self.call('thread/unsubscribe', {'threadId': thread})
+        deadline = time.monotonic() + self.timeout
+        while True:
+            result = self.call('thread/read', {'threadId': thread, 'includeTurns': False})
+            if result['thread']['status']['type'] == 'notLoaded':
+                return
+            if time.monotonic() >= deadline:
+                raise CodexAppError(f'Codex thread {thread} is still loaded in the app-server; '
+                                    'wait for it to close before resuming it')
+            time.sleep(0.05)
 
 
 def create_named_thread(name, cwd, executable='codex'):
     """A new, empty Codex thread in `cwd` named `name`; returns its ID."""
     server = AppServer(executable)
     try:
-        thread = server.call('thread/start', {'cwd': str(cwd)})['thread']['id']
-        server.call('thread/name/set', {'threadId': thread, 'name': name})
+        # Disconnecting the proxy alone leaves the daemon holding the writer lock
+        # for its idle grace period (normally 60s), racing the CLI's resume.
+        thread = server.call('thread/start', {
+            'cwd': str(cwd), 'config': {'thread_unload_delay_secs': 0},
+        })['thread']['id']
+        try:
+            server.call('thread/name/set', {'threadId': thread, 'name': name})
+        finally:
+            server.release_thread(thread)
         return thread
     finally:
         server.close()
