@@ -78,7 +78,7 @@ class InjectTests(unittest.IsolatedAsyncioTestCase):
                             'sys.exit(1 if "--thread=gone" in sys.argv else 0)\n')
             fake.chmod(0o700)
             await CodexQueue(str(fake))('0199-thread', '--resume\n두 줄')
-            self.assertEqual(json.loads(log.read_text()), ['queue', '--thread=0199-thread', '--message=--resume\n두 줄', '--resume'])
+            self.assertEqual(json.loads(log.read_text()), ['queue', '--thread=0199-thread', '--message=--resume\n두 줄'])
             with self.assertRaises(RuntimeError):
                 await CodexQueue(str(fake))('gone', 'x')
 

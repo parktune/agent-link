@@ -152,7 +152,9 @@ class CodexQueue:
     async def __call__(self, thread, text):
         # `=` forms keep the target and text from ever being parsed as options.
         process = await asyncio.create_subprocess_exec(
-            self.executable, 'queue', f'--thread={thread}', f'--message={text}', '--resume',
+            # Delivery must not open a closed thread in the daemon: doing so
+            # takes its writer lock away from the user's next interactive resume.
+            self.executable, 'queue', f'--thread={thread}', f'--message={text}',
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), self.timeout)

@@ -985,6 +985,11 @@ def open_codex(action=None, target=None, extra=()):
     env = [('AGENT_LINK_REGISTER', name)] + ([('AGENT_LINK_THREAD', session['id'])] if session else [])
     overrides = [part for key, value in env for part in ('-c', f'mcp_servers.agent-link.env.{key}={json.dumps(value)}')]
     if session:
+        from .codex_app import CodexAppError, check_thread_available
+        try:
+            check_thread_available(session['id'])
+        except CodexAppError as error:
+            raise SystemExit(str(error)) from None
         mode = ['resume', session['id']]
         say_err('messages are queued into this session (codex queue).')
     else:

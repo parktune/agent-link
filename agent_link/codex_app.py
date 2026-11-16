@@ -8,6 +8,7 @@ returns its ID, `thread/name/set` gives it the name (as /rename would). `codex r
 import base64
 import json
 import os
+from pathlib import Path
 import select
 import struct
 import subprocess
@@ -16,6 +17,32 @@ import time
 
 class CodexAppError(RuntimeError):
     pass
+
+
+def check_thread_available(thread):
+    """Probe Codex's existing writer lock without deleting it or loading the thread."""
+    # Codex owns the authoritative lock; this is only an early, actionable
+    # diagnostic. The CLI still checks it again when opening the conversation.
+    try:
+        import fcntl
+    except ImportError:
+        return
+    home = Path(os.environ.get('CODEX_HOME') or Path.home() / '.codex')
+    path = home / 'thread-writer-locks' / f'{thread}.lock'
+    try:
+        handle = path.open('rb')
+    except FileNotFoundError:
+        return
+    with handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise CodexAppError(
+                f'Codex thread {thread} is open in another app. Close that conversation '
+                'in its owning Codex app (or exit that app with /quit), then retry. '
+                'Switching threads may keep it open. Do not delete the writer-lock file '
+                'or kill other Codex sessions to bypass it.') from None
+        fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 class AppServer:
