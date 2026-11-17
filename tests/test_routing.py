@@ -43,6 +43,23 @@ class SameHostTests(Environment):
 
 
 class MailboxTests(Environment):
+    async def test_content_keeps_its_spacing_on_every_path(self):
+        from agent_link.box import parse
+        from agent_link.inject import codex_envelope
+        await self.server('gpu1', allow_origination='all')
+        alpha = await self.session('gpu1', 'claude', 'alpha')
+        beta = await self.session('gpu1', 'codex', 'beta')
+        text = '이전 요청 01a1 및 01b2를  확인해\t주세요.\n\n  들여쓴 줄,  두 칸 띄움 '
+        await alpha.send('codex:beta', text)
+        await until(lambda: beta.received)
+        self.assertEqual(beta.received[0]['content'], text)
+        self.assertIn(f'--- BEGIN MESSAGE ---\n{text}\n--- END MESSAGE ---', codex_envelope(beta.received[0]))
+        await self.session('gpu1', 'claude', 'gamma', delivery='box')
+        await alpha.send('claude:gamma', text)
+        folder = self.spokes['gpu1'].box.folder('gpu1:claude:gamma')
+        await until(lambda: list(folder.glob('*.md')))
+        self.assertEqual(parse(next(folder.glob('*.md')).read_text())['content'], text)
+
     async def test_s5_s17_closed_box_only_and_failed_push_sessions_get_mailbox_files(self):
         await self.server('gpu1', allow_origination='host')
         a = await self.session('gpu1', 'claude', 'alpha')

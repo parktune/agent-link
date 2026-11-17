@@ -484,6 +484,8 @@ def claude_hook_watch(socket_path=None, wait_registration=60, interval=2.0):
         if agent or time.monotonic() >= deadline:
             break
         time.sleep(interval)
+    from .claude_hooks import RENEW_BEFORE, TIMEOUT
+    renew_at = time.time() + TIMEOUT - RENEW_BEFORE  # before Claude Code ends this hook at its timeout
     box = None
     while True:
         if not agent or agent.get('tool') != 'claude' or agent.get('delivery') != 'box' or not agent.get('box'):
@@ -494,7 +496,7 @@ def claude_hook_watch(socket_path=None, wait_registration=60, interval=2.0):
         if not watch_enabled(box):
             return 0
         try:
-            _, other = wait_for_mail(box, interval, new_only=True)
+            count, other = wait_for_mail(box, interval, new_only=True, deadline=renew_at)
             break
         except Stopped:
             pass  # after a /rename the session has a new box: look it up again
@@ -504,8 +506,12 @@ def claude_hook_watch(socket_path=None, wait_registration=60, interval=2.0):
             return 0
     if other:
         return 0
-    print(hook_wake_text(box), file=sys.stderr, flush=True)
+    print(hook_wake_text(box) if count else RENEW_TEXT, file=sys.stderr, flush=True)
     return 2
+
+
+RENEW_TEXT = ('agent-link: no new message. The mailbox watch reached its time limit and starts again after this turn. '
+              'Nothing to do: call no tool and answer with at most one short line.')
 
 
 HOOK_MESSAGES, HOOK_CHARS = 5, 4000  # what the wake-up text carries; the rest stays for check_box

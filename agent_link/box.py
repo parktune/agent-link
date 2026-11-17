@@ -155,14 +155,14 @@ def watch_enabled(folder):
     return not watch_files(folder)[1].exists()
 
 
-def wait_for_mail(folder, interval=2.0, sleep=time.sleep, new_only=False):
+def wait_for_mail(folder, interval=2.0, sleep=time.sleep, new_only=False, deadline=None):
     """Block until the received/ folder holds an unread message and return (count, None).
 
     Return (0, pid) at once when another live waiter already watches this folder, so a session
     that arms the watch twice keeps one. The folder may not exist yet (no mail so far).
     With `new_only` (the Claude hook), wait for mail the session was not woken for before: unread files
     it already heard about stay unread until it reads them, and must not wake it again and again.
-    Raise Stopped on SIGTERM, which `stop_waiter` sends.
+    Raise Stopped on SIGTERM, which `stop_waiter` sends. Return (0, None) when no mail came by `deadline` (time.time()).
     """
     folder = Path(folder)
     lock, _ = watch_files(folder)
@@ -190,6 +190,8 @@ def wait_for_mail(folder, interval=2.0, sleep=time.sleep, new_only=False):
                     _seen_file(folder).write_text(''.join(f'{name}\n' for name in sorted(unread)))
                 return len(unread), None
             seen &= unread  # read messages leave received/; forget them
+            if deadline is not None and time.time() >= deadline:
+                return 0, None
             sleep(interval)
     finally:
         signal.signal(signal.SIGTERM, previous)

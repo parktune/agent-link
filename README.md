@@ -89,7 +89,7 @@ $agent-link trainer 체크포인트 경로 알려줘
 
 Codex 메시지 전송은 `codex queue`만 사용하며 `--resume`으로 닫힌 스레드를 자동으로 열지 않습니다. 자동 재개는 app-server가 스레드의 쓰기 잠금을 잡아 다음 터미널 열기를 막을 수 있기 때문입니다. 닫힌 대화는 사용자가 `agent-link codex resume <이름>`으로 엽니다. 다른 Codex 앱이 이미 쓰기 잠금을 보유하면 실행 전에 안내합니다. 그 앱에서 해당 대화를 닫거나 `/quit`으로 종료한 뒤 다시 시도하세요. 단순 스레드 전환으로 잠금이 해제되지 않을 수 있으며, lock 파일 삭제나 다른 세션 강제 종료는 하지 않습니다.
 
-Channels가 막힌 Claude 세션은 hook이 깨웁니다. Claude Code가 세션 시작과 매 턴 끝에 `agent-link wait-box --hook`을 백그라운드로 띄우고, 새 메일이 오면 그 hook이 메시지 내용을 담아 끝나면서 세션이 깨어납니다. 화면에는 `agent-link: new message`가 뜨고, 세션은 메시지마다 `from <보낸 세션> (<종류>): <내용>` 한 줄을 보여 줍니다(짧은 메시지는 원문 그대로). Channels로 받는 세션은 Claude Code가 `← agent-link: from <보낸 세션> (<종류>): <내용>`을 직접 보여 주므로 세션이 다시 쓰지 않습니다. agent-link에 박스로 등록된 세션이 아니면 hook은 바로 끝납니다. 같은 메일로 두 번 깨우지 않습니다.
+Channels가 막힌 Claude 세션은 hook이 깨웁니다. Claude Code가 세션 시작과 매 턴 끝에 `agent-link wait-box --hook`을 백그라운드로 띄우고, 새 메일이 오면 그 hook이 메시지 내용을 담아 끝나면서 세션이 깨어납니다. 화면에는 `agent-link: new message`가 뜨고, 세션은 메시지마다 `from <보낸 세션> (<종류>): <내용>` 한 줄을 보여 줍니다(짧은 메시지는 원문 그대로). Channels로 받는 세션은 Claude Code가 `← agent-link: from <보낸 세션> (<종류>): <내용>`을 직접 보여 주므로 세션이 다시 쓰지 않습니다. agent-link에 박스로 등록된 세션이 아니면 hook은 바로 끝납니다. 같은 메일로 두 번 깨우지 않습니다. hook은 Claude Code가 정한 시간(20일)이 지나면 끝나고 다음 턴이 끝날 때에야 다시 뜨므로, 세션이 그동안 한 번도 쓰이지 않으면 끝나기 1시간 전에 "새 메시지 없음"으로 세션을 한 번 깨워 감시를 다시 겁니다.
 
 박스는 로컬 PC `<repo>/hub/<tool>-<name>/received/`, 서버 `<repo>/spoke/<tool>-<name>/received/`에 메시지 1건당 Markdown 파일 1개로 쌓입니다.
 

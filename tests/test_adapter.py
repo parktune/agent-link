@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import os
 import shlex
@@ -284,6 +285,26 @@ class AdapterTests(Environment):
 
 
 class WaitForMailTests(unittest.TestCase):
+    def test_returns_no_mail_at_the_deadline(self):
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root, 'claude-head', 'received')
+            self.assertEqual(wait_for_mail(folder, 0, new_only=True, deadline=0), (0, None))
+
+    def test_the_hook_wakes_the_session_before_claude_code_ends_it_at_its_timeout(self):
+        from agent_link import claude_hooks, cli
+        with tempfile.TemporaryDirectory() as root:
+            box = Path(root, 'claude-head', 'received')
+            agent = {'tool': 'claude', 'delivery': 'box', 'box': str(box)}
+
+            async def ask(*_, **__):
+                return {'agent': agent}
+            stdin, stderr = io.StringIO(json.dumps({'session_id': 'sid', 'hook_event_name': 'Stop'})), io.StringIO()
+            with mock.patch.object(cli.service, 'alive', return_value=True), mock.patch.object(cli, 'ask', ask), \
+                    mock.patch.object(claude_hooks, 'TIMEOUT', claude_hooks.RENEW_BEFORE), \
+                    mock.patch.object(sys, 'stdin', stdin), mock.patch.object(sys, 'stderr', stderr):
+                self.assertEqual(cli.claude_hook_watch(interval=0), 2)
+            self.assertIn('no new message', stderr.getvalue())
+
     def test_waits_for_a_folder_that_does_not_exist_yet_and_ignores_a_stale_lock(self):
         with tempfile.TemporaryDirectory() as root:
             folder = Path(root, 'claude-head', 'received')
@@ -364,7 +385,8 @@ class ClaudeHookTests(unittest.TestCase):
                 ours = [h for e in settings['hooks'][event] for h in e['hooks'] if 'wait-box --hook' in h['command']]
                 self.assertEqual(len(ours), 1)
                 self.assertEqual((ours[0]['asyncRewake'], ours[0]['command'].split()[0]), (True, '/new/python'))
-                self.assertGreaterEqual(ours[0]['timeout'], 86400)
+                self.assertEqual(ours[0]['timeout'], claude_hooks.TIMEOUT)
+                self.assertLess(ours[0]['timeout'] * 1000, 2 ** 31)  # fits a 32-bit millisecond timer
                 self.assertEqual(ours[0]['rewakeSummary'], 'agent-link: new message')  # not "Stop hook feedback"
             self.assertTrue(claude_hooks.installed(path))
             stale = json.loads(path.read_text())
@@ -373,6 +395,14 @@ class ClaudeHookTests(unittest.TestCase):
                     hook.pop('rewakeSummary', None)
             path.write_text(json.dumps(stale))
             self.assertFalse(claude_hooks.installed(path))  # an older install: setup.sh puts the notice in
+            claude_hooks.install(path)
+            stale = json.loads(path.read_text())
+            for entry in stale['hooks']['Stop']:
+                for hook in entry['hooks']:
+                    if 'wait-box --hook' in hook['command']:
+                        hook['timeout'] = 7 * 24 * 3600
+            path.write_text(json.dumps(stale))
+            self.assertFalse(claude_hooks.installed(path))  # the old 7-day timeout: installed again
             claude_hooks.install(path, remove=True)
             self.assertEqual(json.loads(path.read_text()), {'model': 'opus', 'hooks': {'Stop': [other]}})
 

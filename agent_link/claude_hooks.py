@@ -12,7 +12,11 @@ import sys
 
 EVENTS = ('SessionStart', 'Stop')
 MARK = 'wait-box --hook'
-TIMEOUT = 7 * 24 * 3600  # Claude Code kills a hook at its timeout without a word; the next Stop starts it again
+# Claude Code kills a hook at its timeout without a word, and only the next turn's Stop starts it again, so a
+# session left idle past it would miss mail. The hook wakes the session itself just before (RENEW_BEFORE), which
+# ends in a Stop that starts a new one. 20 days stays within a 32-bit millisecond timer (24.8 days).
+TIMEOUT = 20 * 24 * 3600
+RENEW_BEFORE = 3600
 # What the user sees when the hook wakes the session (Claude Code's default is "Stop hook feedback"), and the
 # prefix the model gets before the hook's text (default: "Stop hook blocking error from command ...").
 SUMMARY = 'agent-link: new message'
@@ -52,7 +56,8 @@ def installed(path=None):
 
 def _current(entry):
     """Installed by this version (an older entry lacks the notice text and shows "Stop hook feedback")."""
-    return any(hook.get('rewakeSummary') == SUMMARY for hook in entry.get('hooks') or [] if isinstance(hook, dict))
+    return any(hook.get('rewakeSummary') == SUMMARY and hook.get('timeout') == TIMEOUT
+               for hook in entry.get('hooks') or [] if isinstance(hook, dict))
 
 
 def install(path=None, python=None, remove=False):
