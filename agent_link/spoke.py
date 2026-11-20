@@ -269,6 +269,7 @@ class Spoke:
                                                    if matches(a, filter_text)]
         self.server = None
         self._tasks = set()
+        self._tidied = 0.0
 
     # ---- IPC server -------------------------------------------------------------------------
     async def start(self, socket_path):
@@ -482,6 +483,21 @@ class Spoke:
                       if a.conn is None and (a.last_seen < opened or a.last_message < active)]:
             self.remove_agent(agent.id, reason='expired')
 
+    def tidy_boxes(self, now=None):
+        """Mailbox clean-up (read messages, folders of unregistered sessions), at most once an hour."""
+        now = now or time.time()
+        if now - self._tidied < 3600:
+            return
+        self._tidied = now
+        try:
+            removed = self.box.tidy({self.box.folder(a) for a in self.agents}, self.config.read_retention_days,
+                                    self.config.unregistered_box_days, now)
+        except OSError as error:
+            self.log('box_tidy_failed', error=str(error))
+            return
+        for name in removed:
+            self.log('box_removed', folder=name)
+
     def lookup(self, session_id):
         """A restarted MCP process of the same session gets its earlier registration back."""
         if not isinstance(session_id, str) or not session_id:
@@ -620,9 +636,11 @@ class Spoke:
 
     async def _presence_loop(self):
         self.expire()
+        self.tidy_boxes()
         while True:
             await asyncio.sleep(PRESENCE_INTERVAL)
             self.expire()
+            self.tidy_boxes()
             self.presence_changed()
 
 

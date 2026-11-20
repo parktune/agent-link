@@ -5,6 +5,7 @@ import os
 import shlex
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 from unittest import mock
@@ -659,3 +660,48 @@ class LaunchRegisterTests(Environment):
         self.assertEqual(me['id'], 'gpu1:codex:trainer')
         self.assertTrue(me['push']['available'])
         self.assertEqual(self.spokes['gpu1'].agents['gpu1:codex:trainer'].delivery, 'push')
+
+
+class MailboxTidyTests(unittest.TestCase):
+    def test_read_messages_and_unregistered_folders_are_deleted_after_15_days(self):
+        from agent_link.box import Box, read_unread
+        day = 86400
+        with tempfile.TemporaryDirectory() as root:
+            box = Box(root)
+            message = {'id': '01abc', 'from': 'gpu1:claude:a', 'type': 'request', 'in_reply_to': '', 'hops': 0,
+                       'created_at': '2026-11-01T00:00:00Z', 'content': 'hi'}
+            for to in ('gpu1:claude:kept', 'gpu1:claude:gone'):
+                box.put({**message, 'to': to})
+                box.put({**message, 'to': to, 'id': '01abd'})
+            kept = box.folder('gpu1:claude:kept')
+            old = read_unread(kept, limit=1)[0]['file']
+            self.assertGreater(os.stat(old).st_mtime, time.time() - 60)  # moving to read/ stamps the read time
+            os.utime(old, (time.time() - 16 * day,) * 2)
+            for path in kept.glob('*.md'):
+                os.utime(path, (time.time() - 100 * day,) * 2)  # unread: kept however old
+            now = time.time()
+            self.assertEqual(box.tidy({kept}, 15, 15, now), [])
+            self.assertFalse(Path(old).exists())
+            self.assertEqual(len(list(kept.glob('*.md'))), 1)
+            gone = box.folder('gpu1:claude:gone')
+            self.assertTrue((gone.parent / 'unregistered').exists())  # marked the first time it is seen unused
+            self.assertEqual(box.tidy({kept}, 15, 15, now + 14 * day), [])
+            self.assertTrue(gone.is_dir())
+            self.assertEqual(box.tidy({kept, gone}, 15, 15, now + 14 * day), [])  # registered again: mark dropped
+            self.assertFalse((gone.parent / 'unregistered').exists())
+            box.tidy({kept}, 15, 15, now)
+            self.assertEqual(box.tidy({kept}, 15, 15, now + 16 * day), ['claude-gone'])
+            self.assertFalse(gone.parent.exists())
+            self.assertTrue(kept.is_dir())
+
+    def test_the_log_keeps_one_older_file_past_5mb(self):
+        from agent_link import state
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root, 'hub.log')
+            log = state.Log(path)
+            with mock.patch.object(state, 'LOG_MAX_BYTES', 100):
+                for index in range(10):
+                    log('event', index=index)
+            self.assertLessEqual(path.stat().st_size, 100 + 60)
+            self.assertTrue(Path(root, 'hub.log.1').exists())
+            self.assertEqual(sorted(p.name for p in Path(root).iterdir()), ['hub.log', 'hub.log.1'])

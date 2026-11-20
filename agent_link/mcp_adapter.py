@@ -305,7 +305,8 @@ TOOLS = [
      'by_id}: after the user exits this session, `command` (agent-link claude resume) reopens it with push by its name.',
      {}, []),
     ('unregister', 'Withdraw this session\'s registration (only when the user asks): other agents can no longer message '
-     'it and its mailbox watch stops. The mailbox folder is kept.', {}, []),
+     'it and its mailbox watch stops. The mailbox folder is kept for 15 days, '
+     'in case the session registers again under the same name.', {}, []),
     ('set_watch', 'Turn the mailbox watch of a Claude session without push on or off (when the user asks). Off is '
      'remembered for this agent name and stops the running watch; on lets the hook watch again from the next turn.',
      {'enabled': {'type': 'boolean'}}, ['enabled']),

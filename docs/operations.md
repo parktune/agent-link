@@ -75,6 +75,8 @@ agent-link revoke                    # 서버: 토큰 해시 삭제, 현재 연�
 | `max_hops` | 3 | hop 상한 |
 | `offline_expiry_days` | 15 | 닫힌 세션이 이 기간 동안 열리지 않으면 등록을 해제한다 |
 | `idle_expiry_days` | 15 | 닫힌 세션이 이 기간 동안 메시지를 보내거나 받지 않으면 등록을 해제한다. 해제된 세션은 기록이 남지 않고, 사용자가 다시 등록해야 한다 |
+| `read_retention_days` | 15 | 읽은 메시지(`received/read/`)를 읽은 뒤 이 기간이 지나면 지운다. 읽지 않은 메시지는 지우지 않는다 |
+| `unregistered_box_days` | 15 | 등록이 해제된 세션의 메일함 폴더를 이 기간이 지나면 폴더째(읽지 않은 메시지 포함) 지운다. 그 전에 같은 이름으로 다시 등록하면 그대로 이어 쓴다 |
 | `outbox_max_items` / `outbox_max_bytes` | 1000 / 16 MiB | 넘으면 새 메시지를 `outbox_full`로 거부한다(오래된 것을 버리지 않는다) |
 | `deliver_timeout` | 60 | 세션 주입 확인 대기(초) |
 | `socket_mode` / `socket_group` | `0o600` / 없음 | 한 호스트에서 여러 OS 계정이 daemon을 함께 쓸 때 그룹 권한을 준다(15장 3번, 미검증) |

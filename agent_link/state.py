@@ -53,6 +53,8 @@ class Config:
     max_hops: int = 3
     offline_expiry_days: float = 15  # a closed session not opened for this long is unregistered
     idle_expiry_days: float = 15  # ... and one without a message sent or received for this long
+    read_retention_days: float = 15  # read mailbox messages (received/read/) are deleted this long after reading
+    unregistered_box_days: float = 15  # the mailbox folder of an unregistered session is deleted after this long
     outbox_max_items: int = 1000
     outbox_max_bytes: int = 16 << 20
     deliver_timeout: float = 60.0
@@ -80,6 +82,9 @@ class Config:
         return config
 
 
+LOG_MAX_BYTES = 5 << 20
+
+
 class Log:
     """JSON Lines events. Message bodies are never passed in; callers log metadata only."""
 
@@ -92,6 +97,11 @@ class Log:
     def __call__(self, event, **values):
         line = json.dumps({'at': round(time.time(), 3), 'event': event, **values}, ensure_ascii=False)
         if self.path:
+            try:
+                if self.path.stat().st_size >= LOG_MAX_BYTES:
+                    os.replace(self.path, self.path.with_name(self.path.name + '.1'))  # keep one older file
+            except FileNotFoundError:
+                pass
             with self.path.open('a') as handle:
                 handle.write(line + '\n')
             self.path.chmod(0o600)

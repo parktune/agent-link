@@ -4,11 +4,13 @@ Used when a message cannot be pushed into an open session: the session is closed
 available for it, or the push failed. Layout: <root>/<tool>-<name>/received/[read/]<file>.md, plus
 <root>/<tool>-<name>/watch.pid while a session waits for mail with `agent-link wait-box`,
 <root>/<tool>-<name>/watch.off when the user turned that watch off, and <root>/<tool>-<name>/watch.seen
-with the unread files the Claude hook already woke the session for.
+with the unread files the Claude hook already woke the session for. A folder no registered session uses gets
+<root>/<tool>-<name>/unregistered (see Box.tidy).
 """
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import time
 
@@ -54,6 +56,35 @@ class Box:
         """Return unread messages oldest first and move them to received/read/."""
         return read_unread(self.folder(agent), limit)
 
+    def tidy(self, in_use, read_days, unregistered_days, now=None):
+        """Delete read messages older than `read_days` (since they were read) and the whole folder of a session
+        unregistered `unregistered_days` ago. Unread messages of a registered session are never deleted.
+
+        `in_use` holds the received/ folders of the registered sessions. A folder outside it gets an `unregistered`
+        mark when first seen so; registering again (the same name) takes the folder back and drops the mark.
+        """
+        now = now or time.time()
+        if not self.root.is_dir():
+            return []
+        removed = []
+        for folder in sorted(self.root.iterdir()):
+            received = folder / 'received'
+            if folder.is_symlink() or not received.is_dir():
+                continue
+            mark = folder / 'unregistered'
+            if received in in_use:
+                mark.unlink(missing_ok=True)
+            elif not mark.exists():
+                mark.touch()
+            elif mark.stat().st_mtime < now - unregistered_days * 86400:
+                shutil.rmtree(folder)
+                removed.append(folder.name)
+                continue
+            for path in (received / 'read').glob('*.md'):
+                if path.stat().st_mtime < now - read_days * 86400:
+                    path.unlink(missing_ok=True)
+        return removed
+
     def count(self, agent):
         folder = self.folder(agent)
         return len(list(folder.glob('*.md'))) if folder.is_dir() else 0
@@ -70,6 +101,7 @@ def read_unread(folder, limit=20, keep=lambda message: False):
         if not keep(message):
             target = _private(folder / 'read') / path.name
             os.replace(path, target)
+            os.utime(target)  # the read time: read messages are deleted read_retention_days after it
             message['file'] = str(target)
         messages.append(message)
     return messages
